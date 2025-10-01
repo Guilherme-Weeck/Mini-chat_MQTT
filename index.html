@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <title>MiniChat MQTT</title>
+  <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 0; background: #e5f6ff; }
+    header { background: #0099ff; color: white; padding: 10px; text-align: center; display: flex; justify-content: space-between; align-items: center; }
+    #chat { padding: 10px; height: 70vh; overflow-y: auto; background: #f9f9f9; display: flex; flex-direction: column; }
+    .msg { margin: 5px; padding: 8px 12px; border-radius: 12px; max-width: 60%; word-wrap: break-word; }
+    .me { background: #aee4ff; align-self: flex-end; }
+    .other { background: #ddd; align-self: flex-start; }
+    #inputArea { display: flex; padding: 10px; background: white; }
+    #msg { flex: 1; padding: 8px; border-radius: 8px; border: 1px solid #ccc; }
+    button { margin-left: 5px; padding: 8px 12px; border: none; background: #0099ff; color: white; border-radius: 8px; cursor: pointer; }
+    .btn-small { background: #ff6666; margin-left: 10px; }
+  </style>
+</head>
+<body>
+  <header>
+    <div>
+      <h2 style="margin:0;">MiniChat MQTT</h2>
+      <span id="username"></span>
+    </div>
+    <button class="btn-small" onclick="trocarUsuario()">Trocar Usuário</button>
+  </header>
+
+  <div style="padding:10px;">
+    <label>Conversar com: </label>
+    <input type="text" id="targetUser" placeholder="Nome do usuário">
+    <button onclick="iniciarConversa()">Iniciar</button>
+  </div>
+
+  <div id="chat"></div>
+
+  <div id="inputArea" style="display:none;">
+    <input type="text" id="msg" placeholder="Digite sua mensagem...">
+    <button onclick="enviarMensagem()">Enviar</button>
+  </div>
+
+  <script>
+    let usuario = localStorage.getItem("usuario");
+    if (!usuario) {
+      usuario = prompt("Digite seu nome de usuário:");
+      localStorage.setItem("usuario", usuario);
+    }
+    document.getElementById("username").textContent = "Usuário: " + usuario;
+
+    const client = mqtt.connect("wss://broker.hivemq.com:8884/mqtt");
+    let topicoAtual = null;
+
+    client.on("connect", () => {
+      console.log("✅ Conectado ao HiveMQ");
+    });
+
+    client.on("message", (topic, message) => {
+      const msgBox = document.getElementById("chat");
+      const msgDiv = document.createElement("div");
+      msgDiv.className = "msg other";
+      msgDiv.textContent = message.toString();
+      msgBox.appendChild(msgDiv);
+      msgBox.scrollTop = msgBox.scrollHeight;
+    });
+
+    function iniciarConversa() {
+      const destino = document.getElementById("targetUser").value.trim();
+      if (!destino) return alert("Digite um usuário válido!");
+
+      if (topicoAtual) client.unsubscribe(topicoAtual);
+
+      const nomes = [usuario, destino].sort().join("_");
+      topicoAtual = `XzzXminichat2025/usuarios/${nomes}`;
+
+      client.subscribe(topicoAtual, err => {
+        if (!err) {
+          console.log("📡 Inscrito no tópico:", topicoAtual);
+          document.getElementById("inputArea").style.display = "flex";
+          document.getElementById("chat").innerHTML = "";
+        }
+      });
+    }
+
+    function enviarMensagem() {
+      const input = document.getElementById("msg");
+      const texto = input.value.trim();
+      if (!texto) return;
+
+      client.publish(topicoAtual, usuario + ": " + texto);
+
+      const msgBox = document.getElementById("chat");
+      const msgDiv = document.createElement("div");
+      msgDiv.className = "msg me";
+      msgDiv.textContent = "Eu: " + texto;
+      msgBox.appendChild(msgDiv);
+      msgBox.scrollTop = msgBox.scrollHeight;
+
+      input.value = "";
+    }
+
+    function trocarUsuario() {
+      localStorage.removeItem("usuario");
+      usuario = prompt("Digite o novo nome de usuário:");
+      if (!usuario) usuario = "anonimo_" + Math.floor(Math.random()*1000);
+      localStorage.setItem("usuario", usuario);
+      document.getElementById("username").textContent = "Usuário: " + usuario;
+      document.getElementById("chat").innerHTML = "";
+      document.getElementById("inputArea").style.display = "none";
+      topicoAtual = null;
+      document.getElementById("targetUser").value = "";
+    }
+  </script>
+</body>
+</html>
