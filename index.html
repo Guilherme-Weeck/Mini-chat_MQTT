@@ -379,25 +379,22 @@
     }
 
     function marcarStatusLocal(msgId, tipo) {
-      // tipo: delivered | read
-      for (const contato in historico) {
-        const msgs = historico[contato];
-        if (!msgs) continue;
-        for (let m of msgs) {
-          if (m.id === msgId) {
-            if (tipo === "delivered") {
-              if (m.status === "sent") m.status = "delivered";
-            } else if (tipo === "read") {
-              m.status = "read";
-            }
-            localStorage.setItem("historico", JSON.stringify(historico));
-            // se a conversa atual corresponde, re-render
-            if (contato === destinoAtual) renderHistorico(destinoAtual);
-            return;
+    for (const contato in historico) {
+      const msgs = historico[contato] || [];
+      for (let m of msgs) {
+        if (m.id === msgId) {
+          if (tipo === "delivered" && m.status === "sent") {
+            m.status = "delivered";
+          } else if (tipo === "read") {
+            m.status = "read";
           }
+          localStorage.setItem("historico", JSON.stringify(historico));
+          if (contato === destinoAtual) renderHistorico(destinoAtual);
+          return;
         }
       }
     }
+  }
 
     function renderHistorico(contato) {
       const chat = document.getElementById("chat");
