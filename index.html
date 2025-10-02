@@ -6,7 +6,13 @@
   <title>MiniChat MQTT</title>
   <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
   <style>
-    body { margin:0; font-family: Arial, sans-serif; height:100vh; display:flex; background:#e5f6ff; }
+    body {
+      margin:0;
+      font-family: Arial, sans-serif;
+      height:100vh;
+      display:flex;
+      overflow: hidden; /* 🚫 impede que o body role */
+    }
     /* Sidebar */
     #sidebar { width:280px; background:#fff; border-right:1px solid #ccc; display:flex; flex-direction:column; }
     #user-info { padding:12px; background:#0099ff; color:white; display:flex; justify-content:space-between; align-items:center; }
@@ -15,11 +21,23 @@
     .nome { font-weight:bold; }
     .badge { background:red; color:white; border-radius:12px; padding:2px 6px; font-size:0.8rem; }
     /* Área principal */
-    #main { flex:1; display:flex; flex-direction:column; }
+    #main {
+      flex:1;
+      display:flex;
+      flex-direction:column;
+      height:100vh;
+    }
     header { background:#0099ff; color:white; padding:10px; display:flex; align-items:center; }
     #menuBtn, #backBtn { background:none; border:none; font-size:1.5rem; color:white; margin-right:10px; cursor:pointer; }
     #chatTitle { flex:1; font-weight:bold; }
-    #chat { flex:1; overflow-y:auto; padding:10px; background:url('https://www.transparenttextures.com/patterns/grey-jean.png') repeat; display:flex; flex-direction:column; }
+    #chat {
+      flex:1;
+      overflow-y:auto; /* ✅ só o chat rola */
+      padding:10px;
+      background:url('https://www.transparenttextures.com/patterns/grey-jean.png') repeat;
+      display:flex;
+      flex-direction:column;
+    }
     .msg { max-width:70%; margin:5px; padding:10px 14px; border-radius:16px; position:relative; font-size:1rem; }
     .me { background:#aee4ff; align-self:flex-end; }
     .other { background:#ddd; align-self:flex-start; }
@@ -259,6 +277,13 @@
     document.getElementById("novoContato").value = "";
     toggleSidebar(); // fecha sidebar no mobile para já ir pro chat
     }
+
+    document.getElementById("msg").addEventListener("focus", () => {
+      setTimeout(() => {
+        const chat = document.getElementById("chat");
+        chat.scrollTop = chat.scrollHeight;
+      }, 300);
+    });
 
   </script>
 </body>
