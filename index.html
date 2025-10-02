@@ -162,7 +162,13 @@
       naoLidas[destino] = 0;
       localStorage.setItem("naoLidas", JSON.stringify(naoLidas));
       renderConversas();
+
+      // 🔹 Fechar sidebar automaticamente no mobile
+      if (window.innerWidth <= 768) {
+        document.getElementById("sidebar").style.display = "none";
+      }
     }
+
 
     function fecharConversa() {
       destinoAtual = null;
@@ -245,7 +251,7 @@
       localStorage.clear();
       location.reload();
     }
-    
+
     function novoContato() {
     const nome = document.getElementById("novoContato").value.trim();
     if (!nome) return;
