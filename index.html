@@ -1,97 +1,160 @@
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
-  <meta charset="UTF-8">
+  <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <title>MiniChat MQTT</title>
   <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
   <style>
+    /* ===== Reset & layout ===== */
+    html,body { height:100%; margin:0; }
     body {
       margin:0;
       font-family: Arial, sans-serif;
       height:100vh;
       display:flex;
-      overflow: hidden; /* 🚫 impede que o body role */
+      background:#e5f6ff;
+      overflow: hidden; /* important: only #chat scrolls */
     }
+
     /* Sidebar */
-    #sidebar { width:280px; background:#fff; border-right:1px solid #ccc; display:flex; flex-direction:column; }
-    #user-info { padding:12px; background:#0099ff; color:white; display:flex; justify-content:space-between; align-items:center; }
-    #conversas { flex:1; overflow-y:auto; }
-    .contato { padding:15px; border-bottom:1px solid #eee; cursor:pointer; display:flex; justify-content:space-between; }
-    .nome { font-weight:bold; }
-    .badge { background:red; color:white; border-radius:12px; padding:2px 6px; font-size:0.8rem; }
-    /* Área principal */
-    #main {
-      flex:1;
+    #sidebar {
+      width:280px;
+      background:#fff;
+      border-right:1px solid #ccc;
       display:flex;
       flex-direction:column;
-      height:100vh;
+      z-index:20;
     }
-    header { background:#0099ff; color:white; padding:10px; display:flex; align-items:center; }
+    #user-info {
+      padding:12px;
+      background:#0099ff; color:white;
+      display:flex; justify-content:space-between; align-items:center;
+    }
+    #conversas { flex:1; overflow-y:auto; }
+    .contato { padding:12px 15px; border-bottom:1px solid #eee; cursor:pointer; display:flex; justify-content:space-between; align-items:center; }
+    .nome { font-weight:600; }
+    .sub { font-size:0.85rem; color:#666; margin-top:4px; }
+    .badge { background:red; color:white; border-radius:12px; padding:2px 8px; font-size:0.8rem; }
+
+    /* Main area */
+    #main { flex:1; display:flex; flex-direction:column; min-height:100vh; position:relative; }
+    header {
+      background:#0099ff; color:white;
+      padding:10px; display:flex; align-items:center;
+      position: sticky; top:0; z-index:15; /* keeps header visible on mobile when keyboard opens */
+    }
     #menuBtn, #backBtn { background:none; border:none; font-size:1.5rem; color:white; margin-right:10px; cursor:pointer; }
-    #chatTitle { flex:1; font-weight:bold; }
+    #chatTitle { flex:1; font-weight:700; }
+
+    /* Chat area (scrollable) */
     #chat {
       flex:1;
-      overflow-y:auto; /* ✅ só o chat rola */
-      padding:10px;
-      background:url('https://www.transparenttextures.com/patterns/grey-jean.png') repeat;
-      display:flex;
-      flex-direction:column;
+      overflow-y:auto;
+      padding:14px 10px 80px; /* bottom padding so last message not hidden behind input */
+      background: url('https://www.transparenttextures.com/patterns/grey-jean.png') repeat;
+      display:flex; flex-direction:column;
+      -webkit-overflow-scrolling: touch;
     }
-    .msg { max-width:70%; margin:5px; padding:10px 14px; border-radius:16px; position:relative; font-size:1rem; }
+
+    /* Message bubble */
+    .msg {
+      max-width:72%;
+      margin:6px 0;
+      padding:10px 44px 10px 14px; /* right padding bigger to make room for time */
+      border-radius:16px; position:relative; font-size:1rem; line-height:1.25;
+      word-break: break-word;
+    }
     .me { background:#aee4ff; align-self:flex-end; }
     .other { background:#ddd; align-self:flex-start; }
-    .hora { font-size:0.7rem; color:#555; position:absolute; bottom:2px; right:8px; }
-    #inputArea { display:flex; padding:8px; background:white; border-top:1px solid #ccc; position:fixed; bottom:0; left:0; right:0; }
-    #emojiBtn { background:none; border:none; font-size:1.4rem; cursor:pointer; margin-right:5px; }
-    #msg { flex:1; padding:10px; font-size:1rem; border-radius:20px; border:1px solid #ccc; }
-    #sendBtn { margin-left:5px; padding:10px 16px; border:none; border-radius:20px; background:#0099ff; color:white; font-size:1rem; cursor:pointer; }
-    /* Responsividade */
-    @media (max-width:768px) {
-      #sidebar { display:none; position:absolute; left:0; top:0; bottom:0; z-index:10; }
+    .hora { font-size:0.72rem; color:#555; position:absolute; bottom:6px; right:10px; margin-left:6px; }
+    .status { font-size:0.72rem; color:#337ab7; position:absolute; bottom:6px; right:40px; } /* ticks for my messages */
+
+    /* Input area (fixed) */
+    #inputArea {
+      display:flex; align-items:center;
+      padding:8px; background:white; border-top:1px solid #ccc;
+      position:fixed; bottom:0; left:0; right:0; z-index:30;
     }
+    #emojiBtn { background:none; border:none; font-size:1.6rem; cursor:pointer; margin-right:8px; }
+    #msg { flex:1; padding:10px 14px; font-size:1rem; border-radius:24px; border:1px solid #ccc; outline:none; }
+    #sendBtn { margin-left:8px; padding:10px 14px; border:none; border-radius:20px; background:#0099ff; color:white; font-size:1rem; cursor:pointer; }
+    #emojiPicker { position:fixed; bottom:60px; left:10px; right:10px; max-width:420px; margin:auto; background:white; border-radius:12px; box-shadow:0 8px 20px rgba(0,0,0,0.15); display:none; padding:8px; z-index:40; flex-wrap:wrap; }
+    .emoji { font-size:1.4rem; padding:8px; cursor:pointer; }
+
+    /* New contact area in sidebar */
+    #novoContatoWrap { padding:10px; border-bottom:1px solid #ccc; display:flex; gap:8px; }
+    #novoContato { flex:1; padding:8px; border-radius:6px; border:1px solid #ccc; }
+
+    /* Responsive: hide sidebar by default on small screens */
+    @media (max-width:768px) {
+      #sidebar { display:none; position:absolute; left:0; top:0; bottom:0; z-index:50; width:85%; max-width:320px; box-shadow: 2px 0 8px rgba(0,0,0,0.15); }
+      #menuBtn { display:inline; }
+    }
+    @media (min-width:769px) {
+      #menuBtn { display:none; }
+    }
+
   </style>
 </head>
 <body>
   <!-- Sidebar -->
-  <div id="sidebar">
-  <div id="user-info">
-    <span id="username"></span>
-    <button onclick="trocarUsuario()" 
-      style="background:#ff6666;color:white;border:none;border-radius:8px;padding:4px 8px;cursor:pointer;">
-      Trocar
-    </button>
-  </div>
+  <div id="sidebar" aria-hidden="false">
+    <div id="user-info">
+      <span id="username">Usuário</span>
+      <button onclick="trocarUsuario()" style="background:#ff6666;color:white;border:none;border-radius:8px;padding:6px 8px;cursor:pointer;">Trocar</button>
+    </div>
 
-  <!-- Novo contato -->
-  <div style="padding:10px; border-bottom:1px solid #ccc;">
-    <input type="text" id="novoContato" placeholder="Novo contato" style="width:70%;padding:6px;">
-    <button onclick="novoContato()" style="padding:6px 10px; background:#0099ff; color:white; border:none; border-radius:6px;">➕</button>
-  </div>
+    <!-- Novo contato -->
+    <div id="novoContatoWrap">
+      <input id="novoContato" placeholder="Novo contato" />
+      <button onclick="novoContato()" style="background:#0099ff;color:white;border:none;border-radius:6px;padding:8px 10px;cursor:pointer;">➕</button>
+    </div>
 
-  <!-- Lista de conversas -->
-  <div id="conversas"></div>
+    <!-- Lista de conversas -->
+    <div id="conversas"></div>
   </div>
-
 
   <!-- Área principal -->
   <div id="main">
     <header>
       <button id="menuBtn" onclick="toggleSidebar()">☰</button>
       <button id="backBtn" onclick="fecharConversa()" style="display:none;">←</button>
-      <span id="chatTitle">MiniChat</span>
+      <div id="chatTitle">MiniChat</div>
     </header>
+
     <div id="chat"></div>
-    <div id="inputArea" style="display:none;">
-      <button id="emojiBtn" onclick="adicionarEmoji('😀')">😃</button>
-      <input type="text" id="msg" placeholder="Digite sua mensagem...">
+
+    <!-- Emoji picker -->
+    <div id="emojiPicker" aria-hidden="true">
+      <!-- lista de emojis comuns -->
+      <span class="emoji" onclick="inserirEmoji('😀')">😀</span>
+      <span class="emoji" onclick="inserirEmoji('😃')">😃</span>
+      <span class="emoji" onclick="inserirEmoji('😄')">😄</span>
+      <span class="emoji" onclick="inserirEmoji('😉')">😉</span>
+      <span class="emoji" onclick="inserirEmoji('😍')">😍</span>
+      <span class="emoji" onclick="inserirEmoji('😘')">😘</span>
+      <span class="emoji" onclick="inserirEmoji('😎')">😎</span>
+      <span class="emoji" onclick="inserirEmoji('😅')">😅</span>
+      <span class="emoji" onclick="inserirEmoji('🤣')">🤣</span>
+      <span class="emoji" onclick="inserirEmoji('🤔')">🤔</span>
+      <span class="emoji" onclick="inserirEmoji('🙌')">🙌</span>
+      <span class="emoji" onclick="inserirEmoji('👍')">👍</span>
+      <span class="emoji" onclick="inserirEmoji('👎')">👎</span>
+      <span class="emoji" onclick="inserirEmoji('🙏')">🙏</span>
+      <span class="emoji" onclick="inserirEmoji('🔥')">🔥</span>
+    </div>
+
+    <div id="inputArea">
+      <button id="emojiBtn" onclick="toggleEmojiPicker()" aria-label="Abrir emojis">😃</button>
+      <input id="msg" placeholder="Digite sua mensagem..." autocomplete="off" />
       <button id="sendBtn" onclick="enviarMensagem()">Enviar</button>
     </div>
   </div>
 
   <script>
     // ==============================
-    // Configuração inicial
+    // Inicialização
     // ==============================
     let usuario = localStorage.getItem("usuario");
     if (!usuario) {
@@ -100,60 +163,86 @@
     }
     document.getElementById("username").textContent = usuario;
 
+    // Dados locais
     let conversas = JSON.parse(localStorage.getItem("conversas") || "[]");
-    let historico = JSON.parse(localStorage.getItem("historico") || "{}");
+    let historico = JSON.parse(localStorage.getItem("historico") || "{}"); // { contato: [ {id, autor, msg, hora, status} ] }
     let naoLidas = JSON.parse(localStorage.getItem("naoLidas") || "{}");
-    let statusUsuarios = {};
+    let statusUsuarios = {}; // presença
     let topicoAtual = null;
     let destinoAtual = null;
 
+    // conectar mqtt
     const client = mqtt.connect("wss://broker.hivemq.com:8884/mqtt");
 
-    // ==============================
-    // Conexão
-    // ==============================
     client.on("connect", () => {
+      console.log("conectado");
       client.publish("XzzXminichat2025/presenca/" + usuario, "online", { retain:true });
       client.subscribe("XzzXminichat2025/convites/" + usuario);
       client.subscribe("XzzXminichat2025/presenca/#");
       renderConversas();
+      // restore naoLidas and historico variables from storage (already loaded above)
     });
 
     // ==============================
-    // Receber mensagens
+    // Mensagens recebidas
     // ==============================
-    client.on("message", (topic, message) => {
-      const msg = message.toString();
-
+    client.on("message", (topic, messageBuf) => {
+      const message = messageBuf.toString();
+      // convite
       if (topic.startsWith("XzzXminichat2025/convites/")) {
-        abrirConversa(msg);
+        abrirConversa(message);
         return;
       }
-
+      // presença
       if (topic.startsWith("XzzXminichat2025/presenca/")) {
-        const usuarioPresenca = topic.split("/").pop();
-        statusUsuarios[usuarioPresenca] = msg;
+        const u = topic.split("/").pop();
+        statusUsuarios[u] = message;
         renderConversas();
         return;
       }
-
+      // conversa
       if (topic.startsWith("XzzXminichat2025/usuarios/")) {
-        const [autor, conteudo, hora] = msg.split("|",3);
+        // payload formats:
+        // normal message: <autor>|<texto>|<hora>|<msgId>
+        // ack message: __ACK__|<type>|<msgId>|<reader>
+        const parts = message.split("|");
+        const autor = parts[0];
+        if (autor === "__ACK__") {
+          const tipo = parts[1]; // delivered|read
+          const msgId = parts[2];
+          const reader = parts[3];
+          // atualiza status da mensagem local (se existir)
+          marcarStatusLocal(msgId, tipo);
+          return;
+        }
+        const texto = parts[1] || "";
+        const hora = parts[2] || new Date().toLocaleTimeString([], {hour:"2-digit", minute:"2-digit"});
+        const msgId = parts[3] || (Date.now()+"-"+Math.random().toString(36).slice(2,7));
+
+        // se a mensagem veio de mim mesmo, ignorar (já mostrada localmente)
         if (autor === usuario) return;
 
-        salvarMensagem(autor, { autor, msg:conteudo, hora });
+        // salvar msg vindo de autor
+        salvarMensagem(autor, { id: msgId, autor: autor, msg: texto, hora: hora, status: "delivered" });
+        // enviar ack de delivered (notifica remetente)
+        setTimeout(()=> {
+          client.publish(topicoAtual, "__ACK__|delivered|" + msgId + "|" + usuario);
+        }, 100);
+
         if (autor !== destinoAtual) {
           incrementarNaoLidas(autor);
           renderConversas();
-          notificarNovaMensagem(autor, conteudo);
+          notificarNovaMensagem(autor, texto);
         } else {
           renderHistorico(destinoAtual);
+          // já que abriu a conversa, enviar read ack
+          enviarReadAcksParaContato(autor);
         }
       }
     });
 
     // ==============================
-    // Funções principais
+    // Funções de conversa / UI
     // ==============================
     function iniciarConversa(destino) {
       if (!destino) return;
@@ -181,12 +270,17 @@
       localStorage.setItem("naoLidas", JSON.stringify(naoLidas));
       renderConversas();
 
-      // 🔹 Fechar sidebar automaticamente no mobile
+      // fechar sidebar no mobile
       if (window.innerWidth <= 768) {
         document.getElementById("sidebar").style.display = "none";
       }
-    }
 
+      // enviar read acks (marcar mensagens recebidas como lidas)
+      enviarReadAcksParaContato(destino);
+
+      // focus input and scroll to bottom
+      setTimeout(()=> { focusInputAndScroll(); }, 200);
+    }
 
     function fecharConversa() {
       destinoAtual = null;
@@ -198,91 +292,235 @@
       document.getElementById("menuBtn").style.display = "inline";
     }
 
+    // ==============================
+    // Enviar mensagem (com id e hora)
+    // ==============================
     function enviarMensagem() {
       const input = document.getElementById("msg");
       const texto = input.value.trim();
-      if (!texto || !topicoAtual) return;
+      if (!texto || !topicoAtual || !destinoAtual) return;
+
       const hora = new Date().toLocaleTimeString([], {hour:"2-digit", minute:"2-digit"});
-      client.publish(topicoAtual, usuario + "|" + texto + "|" + hora);
-      salvarMensagem(destinoAtual, { autor:"eu", msg:texto, hora });
+      const msgId = Date.now() + "-" + Math.random().toString(36).slice(2,7);
+
+      // salvar localmente como 'sent' (aparecerá no chat)
+      salvarMensagem(destinoAtual, { id: msgId, autor: "eu", msg: texto, hora: hora, status: "sent" });
       renderHistorico(destinoAtual);
-      input.value="";
+
+      // publicar mensagem no tópico: autor|texto|hora|id
+      client.publish(topicoAtual, usuario + "|" + texto + "|" + hora + "|" + msgId);
+
+      // manter foco no input (impede teclado de fechar)
+      setTimeout(()=> {
+        focusInputAndScroll();
+      }, 50);
+      input.value = "";
     }
 
-    function salvarMensagem(contato, msg) {
+    // Enter behaviour: enviar no desktop com Enter (Shift+Enter -> nova linha)
+    const msgInput = document.getElementById("msg");
+    msgInput.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" && !e.shiftKey) {
+        // on mobile Enter sometimes inserts lines; keep behaviour: send on Enter except when Shift held
+        e.preventDefault();
+        enviarMensagem();
+      }
+    });
+
+    // quando campo recebe foco, rola para final (evita que teclado esconda últimas mensagens)
+    msgInput.addEventListener("focus", () => {
+      setTimeout(()=> {
+        const chat = document.getElementById("chat");
+        chat.scrollTop = chat.scrollHeight;
+      }, 300);
+    });
+
+    function focusInputAndScroll() {
+      const input = document.getElementById("msg");
+      input.focus({preventScroll:true});
+      setTimeout(()=> {
+        const chat = document.getElementById("chat");
+        chat.scrollTop = chat.scrollHeight;
+      }, 200);
+    }
+
+    // ==============================
+    // Persistência: salvar / render historico
+    // ==============================
+    function salvarMensagem(contato, msgObj) {
       if (!historico[contato]) historico[contato] = [];
-      historico[contato].push(msg);
+      historico[contato].push(msgObj);
       localStorage.setItem("historico", JSON.stringify(historico));
+    }
+
+    function marcarStatusLocal(msgId, tipo) {
+      // tipo: delivered | read
+      for (const contato in historico) {
+        const msgs = historico[contato];
+        if (!msgs) continue;
+        for (let m of msgs) {
+          if (m.id === msgId) {
+            if (tipo === "delivered") {
+              if (m.status === "sent") m.status = "delivered";
+            } else if (tipo === "read") {
+              m.status = "read";
+            }
+            localStorage.setItem("historico", JSON.stringify(historico));
+            // se a conversa atual corresponde, re-render
+            if (contato === destinoAtual) renderHistorico(destinoAtual);
+            return;
+          }
+        }
+      }
     }
 
     function renderHistorico(contato) {
       const chat = document.getElementById("chat");
-      chat.innerHTML="";
-      (historico[contato]||[]).forEach(m=>{
-        const div=document.createElement("div");
-        div.className="msg " + (m.autor==="eu"?"me":"other");
-        div.innerHTML= m.msg + `<span class="hora">${m.hora}</span>`;
+      chat.innerHTML = "";
+      const msgs = historico[contato] || [];
+      msgs.forEach(m => {
+        const div = document.createElement("div");
+        div.className = "msg " + (m.autor === "eu" ? "me" : "other");
+        // message text
+        div.innerHTML = escapeHtml(m.msg) + `<span class="hora">${m.hora}</span>`;
+        // status ticks for own messages
+        if (m.autor === "eu") {
+          const st = document.createElement("span");
+          st.className = "status";
+          st.textContent = (m.status === "read" ? "✓✓" : (m.status === "delivered" ? "✓" : ""));
+          div.appendChild(st);
+        }
         chat.appendChild(div);
       });
-      chat.scrollTop = chat.scrollHeight;
+      // scroll to bottom
+      setTimeout(()=> { chat.scrollTop = chat.scrollHeight; }, 50);
     }
 
+    // escape minimal HTML to prevent injection if someone types <> etc.
+    function escapeHtml(str) {
+      return str.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    }
+
+    // ==============================
+    // Conversas list / nao lidas
+    // ==============================
     function renderConversas() {
-      const lista=document.getElementById("conversas");
-      lista.innerHTML="";
-      conversas.forEach(c=>{
-        const div=document.createElement("div");
-        div.className="contato";
-        div.innerHTML = `<span class="nome">${c} ${statusUsuarios[c]==="online"?"🟢":"⚪"}</span>` +
-                        (naoLidas[c]>0?`<span class="badge">${naoLidas[c]}</span>`:"");
-        div.onclick=()=>abrirConversa(c);
+      const lista = document.getElementById("conversas");
+      lista.innerHTML = "";
+      conversas.forEach(c => {
+        const div = document.createElement("div");
+        div.className = "contato";
+        const nameSpan = document.createElement("div");
+        nameSpan.innerHTML = `<div class="nome">${c} ${(statusUsuarios[c]==="online")?"🟢": "⚪"}</div>` +
+                              ( (historico[c] && historico[c].length) ? `<div class="sub">${shortPreview(historico[c].slice(-1)[0].msg)}</div>` : "");
+        const rightSpan = document.createElement("div");
+        if ((naoLidas[c] || 0) > 0) {
+          rightSpan.innerHTML = `<span class="badge">${naoLidas[c]}</span>`;
+        } else {
+          rightSpan.innerHTML = "";
+        }
+        div.appendChild(nameSpan);
+        div.appendChild(rightSpan);
+        div.onclick = () => { abrirConversa(c); };
         lista.appendChild(div);
       });
     }
 
-    function incrementarNaoLidas(contato){
-      naoLidas[contato]=(naoLidas[contato]||0)+1;
+    function shortPreview(text) {
+      if (!text) return "";
+      text = text.replace(/\n/g, " ");
+      return text.length > 32 ? text.slice(0,29) + "..." : text;
+    }
+
+    function incrementarNaoLidas(contato) {
+      naoLidas[contato] = (naoLidas[contato] || 0) + 1;
       localStorage.setItem("naoLidas", JSON.stringify(naoLidas));
     }
 
-    function notificarNovaMensagem(remetente, texto){
-      if (Notification.permission==="granted"){
-        new Notification("Nova mensagem de "+remetente,{body:texto,icon:"https://cdn-icons-png.flaticon.com/512/1384/1384031.png"});
-      } else if (Notification.permission!=="denied"){
+    // ==============================
+    // Notificações
+    // ==============================
+    function notificarNovaMensagem(remetente, texto) {
+      // desktop notifications
+      if (Notification.permission === "granted") {
+        new Notification("Nova mensagem de " + remetente, { body: texto, icon: "https://cdn-icons-png.flaticon.com/512/1384/1384031.png" });
+      } else if (Notification.permission !== "denied") {
         Notification.requestPermission();
       }
-      new Audio("https://notificationsounds.com/storage/sounds/file-sounds-1152-pristine.mp3").play();
+      // sound
+      try {
+        new Audio("https://notificationsounds.com/storage/sounds/file-sounds-1152-pristine.mp3").play();
+      } catch (e) { /* ignore */ }
     }
 
-    function adicionarEmoji(e){
-      const input=document.getElementById("msg");
-      input.value+=e;
+    // ==============================
+    // Emoji picker
+    // ==============================
+    function toggleEmojiPicker() {
+      const p = document.getElementById("emojiPicker");
+      p.style.display = (p.style.display === "flex" || p.style.display === "block") ? "none" : "flex";
+    }
+    function inserirEmoji(e) {
+      const input = document.getElementById("msg");
+      input.value += e;
       input.focus();
+      toggleEmojiPicker();
     }
 
+    // helper alias used earlier
+    function adicionarEmoji(e){ inserirEmoji(e); }
+
+    // ==============================
+    // Sidebar helpers & new contact
+    // ==============================
     function toggleSidebar(){
-      const sb=document.getElementById("sidebar");
-      sb.style.display = (sb.style.display==="block"?"none":"block");
+      const sb = document.getElementById("sidebar");
+      sb.style.display = (sb.style.display === "block") ? "none" : "block";
     }
 
-    function trocarUsuario(){
+    function novoContato() {
+      const nome = document.getElementById("novoContato").value.trim();
+      if (!nome) return;
+      iniciarConversa(nome);
+      document.getElementById("novoContato").value = "";
+      // fecha sidebar no mobile
+      if (window.innerWidth <= 768) toggleSidebar();
+    }
+
+    function trocarUsuario() {
       localStorage.clear();
       location.reload();
     }
 
-    function novoContato() {
-    const nome = document.getElementById("novoContato").value.trim();
-    if (!nome) return;
-    iniciarConversa(nome);
-    document.getElementById("novoContato").value = "";
-    toggleSidebar(); // fecha sidebar no mobile para já ir pro chat
+    // ==============================
+    // ACKs: on opening conversation, send read acks for messages addressed to me
+    // ==============================
+    function enviarReadAcksParaContato(contato) {
+      const msgs = historico[contato] || [];
+      msgs.forEach(m => {
+        if (m.autor !== "eu" && m.status !== "read") {
+          // send read ack for the message id
+          client.publish(topicoAtual, "__ACK__|read|" + m.id + "|" + usuario);
+          // mark locally as read (the sender will receive this and update status)
+          m.status = "read";
+        }
+      });
+      localStorage.setItem("historico", JSON.stringify(historico));
+      // update UI
+      renderHistorico(contato);
     }
 
-    document.getElementById("msg").addEventListener("focus", () => {
-      setTimeout(() => {
-        const chat = document.getElementById("chat");
-        chat.scrollTop = chat.scrollHeight;
-      }, 300);
+    // mark local message statuses when ack arrives
+    // (marcarStatusLocal already does this)
+
+    // ==============================
+    // Persist initial render
+    // ==============================
+    renderConversas();
+
+    // ensure correct scrolling behaviour on orientation / resize
+    window.addEventListener("resize", () => {
+      if (destinoAtual) { setTimeout(()=> { focusInputAndScroll(); }, 200); }
     });
 
   </script>
