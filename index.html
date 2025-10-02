@@ -249,9 +249,11 @@
 
         // salvar msg vindo de autor
         salvarMensagem(autor, { id: msgId, autor: autor, msg: texto, hora: hora, status: "delivered" });
-        // enviar ack de delivered (notifica remetente)
+        // enviar ack de delivered (notifica remetente mesmo se conversa não estiver aberta)
         setTimeout(()=> {
-          client.publish(topicoAtual, "__ACK__|delivered|" + msgId + "|" + usuario);
+          const nomes = [autor, usuario].sort().join("_");
+          const topico = `XzzXminichat2025/usuarios/${nomes}`;
+          client.publish(topico, "__ACK__|delivered|" + msgId + "|" + usuario);
         }, 100);
 
         if (autor !== destinoAtual) {
