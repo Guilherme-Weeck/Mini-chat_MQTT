@@ -5,38 +5,66 @@
   <title>MiniChat MQTT</title>
   <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
   <style>
-    body { font-family: Arial, sans-serif; margin: 0; background: #e5f6ff; }
-    header { background: #0099ff; color: white; padding: 10px; text-align: center; display: flex; justify-content: space-between; align-items: center; }
-    #chat { padding: 10px; height: 65vh; overflow-y: auto; background: #f9f9f9; display: flex; flex-direction: column; }
+    body { font-family: Arial, sans-serif; margin: 0; background: #e5f6ff; display: flex; height: 100vh; }
+    header { background: #0099ff; color: white; padding: 10px; display: flex; justify-content: space-between; align-items: center; }
+    
+    /* Sidebar */
+    #sidebar { width: 250px; background: #fff; border-right: 1px solid #ccc; display: flex; flex-direction: column; }
+    #user-info { padding: 10px; background: #0099ff; color: white; display: flex; justify-content: space-between; align-items: center; }
+    #conversas { flex: 1; overflow-y: auto; }
+    .contato { padding: 10px; border-bottom: 1px solid #eee; cursor: pointer; }
+    .online { color: green; font-weight: bold; }
+    .offline { color: gray; }
+
+    /* Área de chat */
+    #main { flex: 1; display: flex; flex-direction: column; }
+    #chat { padding: 10px; flex: 1; overflow-y: auto; background: #f9f9f9; display: flex; flex-direction: column; }
     .msg { margin: 5px; padding: 8px 12px; border-radius: 12px; max-width: 60%; word-wrap: break-word; }
     .me { background: #aee4ff; align-self: flex-end; }
     .other { background: #ddd; align-self: flex-start; }
+
     #inputArea { display: flex; padding: 10px; background: white; }
     #msg { flex: 1; padding: 8px; border-radius: 8px; border: 1px solid #ccc; }
     button { margin-left: 5px; padding: 8px 12px; border: none; background: #0099ff; color: white; border-radius: 8px; cursor: pointer; }
     .btn-small { background: #ff6666; margin-left: 10px; }
+
+    /* Responsividade */
+    @media (max-width: 768px) {
+      #sidebar { width: 100px; }
+      .contato { font-size: 12px; }
+      #main { flex: 1; }
+    }
+    @media (max-width: 600px) {
+      #sidebar { display: none; }
+    }
   </style>
 </head>
 <body>
-  <header>
-    <div>
-      <h2 style="margin:0;">MiniChat MQTT</h2>
+  <!-- Sidebar -->
+  <div id="sidebar">
+    <div id="user-info">
       <span id="username"></span>
+      <button class="btn-small" onclick="trocarUsuario()">Trocar</button>
     </div>
-    <button class="btn-small" onclick="trocarUsuario()">Trocar Usuário</button>
-  </header>
-
-  <div style="padding:10px;">
-    <label>Conversar com: </label>
-    <input type="text" id="targetUser" placeholder="Nome do usuário">
-    <button onclick="iniciarConversa()">Iniciar</button>
+    <div id="conversas"></div>
   </div>
 
-  <div id="chat"></div>
+  <!-- Área principal -->
+  <div id="main">
+    <header>
+      <div>
+        <label>Conversar com: </label>
+        <input type="text" id="targetUser" placeholder="Nome do usuário">
+        <button onclick="iniciarConversa()">Iniciar</button>
+      </div>
+    </header>
 
-  <div id="inputArea" style="display:none;">
-    <input type="text" id="msg" placeholder="Digite sua mensagem...">
-    <button onclick="enviarMensagem()">Enviar</button>
+    <div id="chat"></div>
+
+    <div id="inputArea" style="display:none;">
+      <input type="text" id="msg" placeholder="Digite sua mensagem...">
+      <button onclick="enviarMensagem()">Enviar</button>
+    </div>
   </div>
 
   <script>
@@ -45,26 +73,34 @@
     // ==============================
     let usuario = localStorage.getItem("usuario");
     if (!usuario) {
-      usuario = prompt("Digite seu nome de usuário:");
-      if (!usuario) usuario = "anonimo_" + Math.floor(Math.random() * 1000);
+      usuario = prompt("Digite seu nome de usuário:") || "anonimo_" + Math.floor(Math.random() * 1000);
       localStorage.setItem("usuario", usuario);
     }
-    document.getElementById("username").textContent = "Usuário: " + usuario;
+    document.getElementById("username").textContent = usuario;
+
+    let conversas = JSON.parse(localStorage.getItem("conversas") || "[]");
+    let statusUsuarios = {};
+    let topicoAtual = null;
+    let destinoAtual = null;
 
     const client = mqtt.connect("wss://broker.hivemq.com:8884/mqtt");
-    let topicoAtual = null;
 
     // ==============================
-    // Conexão com broker
+    // Conexão
     // ==============================
     client.on("connect", () => {
       console.log("✅ Conectado ao HiveMQ");
 
-      // Publica presença (retain = true)
+      // Presença online
       client.publish("XzzXminichat2025/presenca/" + usuario, "online", { retain: true });
 
-      // Inscreve no canal de convites
+      // Inscreve em convites
       client.subscribe("XzzXminichat2025/convites/" + usuario);
+
+      // Assina presença de todos
+      client.subscribe("XzzXminichat2025/presenca/#");
+
+      renderConversas();
     });
 
     // ==============================
@@ -73,25 +109,24 @@
     client.on("message", (topic, message) => {
       const msg = message.toString();
 
-      // Caso seja convite
+      // Convite
       if (topic.startsWith("XzzXminichat2025/convites/")) {
         const remetente = msg;
-        const nomes = [usuario, remetente].sort().join("_");
-        topicoAtual = `XzzXminichat2025/usuarios/${nomes}`;
-
-        client.subscribe(topicoAtual, () => {
-          console.log("📡 Conversa iniciada com:", remetente);
-          document.getElementById("inputArea").style.display = "flex";
-          document.getElementById("chat").innerHTML = "";
-        });
+        abrirConversa(remetente);
         return;
       }
 
-      // Caso seja mensagem normal no chat
+      // Presença
+      if (topic.startsWith("XzzXminichat2025/presenca/")) {
+        const usuarioPresenca = topic.split("/").pop();
+        statusUsuarios[usuarioPresenca] = msg;
+        renderConversas();
+        return;
+      }
+
+      // Mensagem de chat
       if (topic.startsWith("XzzXminichat2025/usuarios/")) {
         const [autor, conteudo] = msg.split("|", 2);
-
-        // Ignora minhas próprias mensagens
         if (autor === usuario) return;
 
         const msgBox = document.getElementById("chat");
@@ -104,12 +139,19 @@
     });
 
     // ==============================
-    // Iniciar conversa
+    // Funções de Conversa
     // ==============================
     function iniciarConversa() {
       const destino = document.getElementById("targetUser").value.trim();
       if (!destino) return alert("Digite um usuário válido!");
+      abrirConversa(destino);
 
+      // Enviar convite
+      client.publish("XzzXminichat2025/convites/" + destino, usuario);
+    }
+
+    function abrirConversa(destino) {
+      destinoAtual = destino;
       const nomes = [usuario, destino].sort().join("_");
       topicoAtual = `XzzXminichat2025/usuarios/${nomes}`;
 
@@ -119,22 +161,20 @@
         document.getElementById("chat").innerHTML = "";
       });
 
-      // Enviar convite para o outro usuário
-      client.publish("XzzXminichat2025/convites/" + destino, usuario);
+      if (!conversas.includes(destino)) {
+        conversas.push(destino);
+        localStorage.setItem("conversas", JSON.stringify(conversas));
+      }
+      renderConversas();
     }
 
-    // ==============================
-    // Enviar mensagem
-    // ==============================
     function enviarMensagem() {
       const input = document.getElementById("msg");
       const texto = input.value.trim();
       if (!texto || !topicoAtual) return;
 
-      // Envia com prefixo de usuário
       client.publish(topicoAtual, usuario + "|" + texto);
 
-      // Mostra só local
       const msgBox = document.getElementById("chat");
       const msgDiv = document.createElement("div");
       msgDiv.className = "msg me";
@@ -145,22 +185,25 @@
       input.value = "";
     }
 
+    function renderConversas() {
+      const lista = document.getElementById("conversas");
+      lista.innerHTML = "";
+      conversas.forEach(c => {
+        const div = document.createElement("div");
+        div.className = "contato";
+        div.textContent = c + " (" + (statusUsuarios[c] === "online" ? "🟢 online" : "⚪ offline") + ")";
+        div.onclick = () => abrirConversa(c);
+        lista.appendChild(div);
+      });
+    }
+
     // ==============================
     // Trocar usuário
     // ==============================
     function trocarUsuario() {
       localStorage.removeItem("usuario");
-      usuario = prompt("Digite o novo nome de usuário:");
-      if (!usuario) usuario = "anonimo_" + Math.floor(Math.random() * 1000);
-      localStorage.setItem("usuario", usuario);
-      document.getElementById("username").textContent = "Usuário: " + usuario;
-      document.getElementById("chat").innerHTML = "";
-      document.getElementById("inputArea").style.display = "none";
-      topicoAtual = null;
-
-      // Reconectar ao broker para atualizar presença e convites
-      client.publish("XzzXminichat2025/presenca/" + usuario, "online", { retain: true });
-      client.subscribe("XzzXminichat2025/convites/" + usuario);
+      localStorage.removeItem("conversas");
+      location.reload();
     }
   </script>
 </body>
