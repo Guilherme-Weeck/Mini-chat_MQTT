@@ -37,12 +37,24 @@
 <body>
   <!-- Sidebar -->
   <div id="sidebar">
-    <div id="user-info">
-      <span id="username"></span>
-      <button onclick="trocarUsuario()" style="background:#ff6666;color:white;border:none;border-radius:8px;padding:4px 8px;cursor:pointer;">Trocar</button>
-    </div>
-    <div id="conversas"></div>
+  <div id="user-info">
+    <span id="username"></span>
+    <button onclick="trocarUsuario()" 
+      style="background:#ff6666;color:white;border:none;border-radius:8px;padding:4px 8px;cursor:pointer;">
+      Trocar
+    </button>
   </div>
+
+  <!-- Novo contato -->
+  <div style="padding:10px; border-bottom:1px solid #ccc;">
+    <input type="text" id="novoContato" placeholder="Novo contato" style="width:70%;padding:6px;">
+    <button onclick="novoContato()" style="padding:6px 10px; background:#0099ff; color:white; border:none; border-radius:6px;">➕</button>
+  </div>
+
+  <!-- Lista de conversas -->
+  <div id="conversas"></div>
+  </div>
+
 
   <!-- Área principal -->
   <div id="main">
@@ -233,6 +245,15 @@
       localStorage.clear();
       location.reload();
     }
+    
+    function novoContato() {
+    const nome = document.getElementById("novoContato").value.trim();
+    if (!nome) return;
+    iniciarConversa(nome);
+    document.getElementById("novoContato").value = "";
+    toggleSidebar(); // fecha sidebar no mobile para já ir pro chat
+    }
+
   </script>
 </body>
 </html>
