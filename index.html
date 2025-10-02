@@ -73,9 +73,13 @@
     .msg {
       max-width:72%;
       margin:6px 0;
-      padding:10px 44px 10px 14px; /* right padding bigger to make room for time */
-      border-radius:16px; position:relative; font-size:1rem; line-height:1.25;
+      padding:10px 14px;
+      border-radius:16px;
+      position:relative;
+      font-size:1rem;
+      line-height:1.25;
       word-break: break-word;
+      display:inline-block;
     }
     .me { background:#aee4ff; align-self:flex-end; }
     .other { background:#ddd; align-self:flex-start; }
@@ -105,6 +109,15 @@
     }
     @media (min-width:769px) {
       #menuBtn { display:none; }
+    }
+    .msg-footer {
+      display:flex;
+      justify-content:flex-end;
+      align-items:center;
+      gap:4px;  /* espaço entre hora e check */
+      font-size:0.72rem;
+      color:#555;
+      margin-top:4px;
     }
 
   </style>
@@ -393,20 +406,32 @@
       msgs.forEach(m => {
         const div = document.createElement("div");
         div.className = "msg " + (m.autor === "eu" ? "me" : "other");
-        // message text
-        div.innerHTML = escapeHtml(m.msg) + `<span class="hora">${m.hora}</span>`;
-        // status ticks for own messages
+
+        // corpo do texto
+        const corpo = document.createElement("div");
+        corpo.textContent = m.msg;
+
+        // rodapé (hora + status)
+        const footer = document.createElement("div");
+        footer.className = "msg-footer";
+
+        const hora = document.createElement("span");
+        hora.textContent = m.hora;
+        footer.appendChild(hora);
+
         if (m.autor === "eu") {
           const st = document.createElement("span");
-          st.className = "status";
           st.textContent = (m.status === "read" ? "✓✓" : (m.status === "delivered" ? "✓" : ""));
-          div.appendChild(st);
+          footer.appendChild(st);
         }
+
+        div.appendChild(corpo);
+        div.appendChild(footer);
         chat.appendChild(div);
       });
-      // scroll to bottom
       setTimeout(()=> { chat.scrollTop = chat.scrollHeight; }, 50);
     }
+
 
     // escape minimal HTML to prevent injection if someone types <> etc.
     function escapeHtml(str) {
@@ -422,18 +447,41 @@
       conversas.forEach(c => {
         const div = document.createElement("div");
         div.className = "contato";
-        const nameSpan = document.createElement("div");
-        nameSpan.innerHTML = `<div class="nome">${c} ${(statusUsuarios[c]==="online")?"🟢": "⚪"}</div>` +
-                              ( (historico[c] && historico[c].length) ? `<div class="sub">${shortPreview(historico[c].slice(-1)[0].msg)}</div>` : "");
-        const rightSpan = document.createElement("div");
+
+        const left = document.createElement("div");
+        left.innerHTML = `<div class="nome">${c} ${(statusUsuarios[c]==="online")?"🟢":"⚪"}</div>` +
+                          ((historico[c] && historico[c].length) 
+                            ? `<div class="sub">${shortPreview(historico[c].slice(-1)[0].msg)}</div>` : "");
+        left.style.flex = "1";
+        left.onclick = () => abrirConversa(c);
+
+        const right = document.createElement("div");
+        right.style.display = "flex";
+        right.style.alignItems = "center";
+        right.style.gap = "6px";
+
         if ((naoLidas[c] || 0) > 0) {
-          rightSpan.innerHTML = `<span class="badge">${naoLidas[c]}</span>`;
-        } else {
-          rightSpan.innerHTML = "";
+          const badge = document.createElement("span");
+          badge.className = "badge";
+          badge.textContent = naoLidas[c];
+          right.appendChild(badge);
         }
-        div.appendChild(nameSpan);
-        div.appendChild(rightSpan);
-        div.onclick = () => { abrirConversa(c); };
+
+        // botão remover
+        const btn = document.createElement("button");
+        btn.textContent = "❌";
+        btn.style.border = "none";
+        btn.style.background = "transparent";
+        btn.style.cursor = "pointer";
+        btn.title = "Remover contato";
+        btn.onclick = (e) => {
+          e.stopPropagation(); // evita abrir conversa ao clicar
+          removerContato(c);
+        };
+        right.appendChild(btn);
+
+        div.appendChild(left);
+        div.appendChild(right);
         lista.appendChild(div);
       });
     }
@@ -534,6 +582,22 @@
     window.addEventListener("resize", () => {
       if (destinoAtual) { setTimeout(()=> { focusInputAndScroll(); }, 200); }
     });
+
+    function removerContato(nome) {
+      if (!confirm("Remover contato " + nome + "?")) return;
+
+      conversas = conversas.filter(c => c !== nome);
+      delete historico[nome];
+      delete naoLidas[nome];
+
+      localStorage.setItem("conversas", JSON.stringify(conversas));
+      localStorage.setItem("historico", JSON.stringify(historico));
+      localStorage.setItem("naoLidas", JSON.stringify(naoLidas));
+
+      if (destinoAtual === nome) fecharConversa();
+
+      renderConversas();
+    }
 
   </script>
 </body>
