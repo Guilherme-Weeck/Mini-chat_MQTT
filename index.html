@@ -225,6 +225,8 @@
       // inscrever convites (usa o nome real do usuário para convites) e presença wildcard
       client.subscribe(`XzzXminichat2025/convites/${usuario}`);
       client.subscribe("XzzXminichat2025/presenca/#");
+      client.subscribe("XzzXminichat2025/historico/#");
+
 
       renderConversas();
 
@@ -313,6 +315,23 @@
           enviarReadAcksParaContato(autor);
         }
       }
+      // histórico vindo do broker
+      if (topic.startsWith("XzzXminichat2025/historico/")) {
+        try {
+          const nomes = topic.split("/").pop().split("_");
+          const outro = nomes.find(n => n !== usuario);
+          const histJson = message.toString();
+          const dados = JSON.parse(histJson);
+          if (Array.isArray(dados)) {
+            historico[outro] = dados;
+            localStorage.setItem("historico", JSON.stringify(historico));
+            if (destinoAtual === outro) renderHistorico(outro);
+          }
+        } catch(e) {
+          console.error("Erro ao ler histórico remoto", e);
+        }
+        return;
+      }
     });
 
     // ==============================
@@ -384,11 +403,13 @@
       // publicar mensagem no tópico: autor|texto|hora|id
       client.publish(topicoAtual, usuario + "|" + texto + "|" + hora + "|" + msgId);
 
-      // manter foco no input (impede teclado de fechar)
-      setTimeout(()=> {
-        focusInputAndScroll();
-      }, 50);
+      // 🔹 publica histórico atualizado (JSON) no tópico historico
+      const nomes = [usuario, destinoAtual].sort().join("_");
+      const topicoHist = `XzzXminichat2025/historico/${nomes}`;
+      client.publish(topicoHist, JSON.stringify(historico[destinoAtual] || []), { retain: true });
+
       input.value = "";
+      setTimeout(()=> { focusInputAndScroll(); }, 50);
     }
 
     // Enter behaviour: enviar no desktop com Enter (Shift+Enter -> nova linha)
