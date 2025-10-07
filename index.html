@@ -295,6 +295,12 @@
 
         // se a mensagem veio de mim mesmo, ignorar (já mostrada localmente)
         if (autor === usuario) return;
+        
+        // se o autor me enviou algo e ele não está na lista de conversas, recria automaticamente
+        if (!conversas.includes(autor)) {
+          conversas.push(autor);
+          localStorage.setItem("conversas", JSON.stringify(conversas));
+        }
 
         // salvar msg vindo de autor
         salvarMensagem(autor, { id: msgId, autor: autor, msg: texto, hora: hora, status: "delivered" });
