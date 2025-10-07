@@ -187,6 +187,9 @@
       localStorage.setItem("usuario", usuario);
     }
     document.getElementById("username").textContent = usuario;
+    // versão segura do usuário (usada nos tópicos de presença)
+    const usuarioSafe = String(usuario).replace(/\s+/g, '_').replace(/[^\w\-]/g, '').slice(0,40);
+
 
     // Dados locais
     let conversas = JSON.parse(localStorage.getItem("conversas") || "[]");
@@ -196,17 +199,61 @@
     let topicoAtual = null;
     let destinoAtual = null;
 
-    // conectar mqtt
-    const client = mqtt.connect("wss://broker.hivemq.com:8884/mqtt");
+    // conectar mqtt com LWT + keepalive + heartbeat
+    const opts = {
+      clientId: 'minichat_' + usuarioSafe + '_' + Math.random().toString(16).slice(2,6),
+      keepalive: 15,       // detecta desconexão em ~15s (ajuste se quiser)
+      clean: true,         // aqui mantemos sessão limpa; para filas persistentes use clean:false
+      will: {
+        topic: `XzzXminichat2025/presenca/${usuarioSafe}`,
+        payload: 'offline',
+        qos: 1,
+        retain: true
+      }
+    };
+
+    const client = mqtt.connect("wss://broker.hivemq.com:8884/mqtt", opts);
+
+    let hbTimer = null; // heartbeat interval handle
 
     client.on("connect", () => {
       console.log("conectado");
-      client.publish("XzzXminichat2025/presenca/" + usuario, "online", { retain:true });
-      client.subscribe("XzzXminichat2025/convites/" + usuario);
+
+      // publica PRESENÇA "online" (retain) usando usuarioSafe
+      client.publish(`XzzXminichat2025/presenca/${usuarioSafe}`, "online", { retain:true });
+
+      // inscrever convites (usa o nome real do usuário para convites) e presença wildcard
+      client.subscribe(`XzzXminichat2025/convites/${usuario}`);
       client.subscribe("XzzXminichat2025/presenca/#");
+
       renderConversas();
-      // restore naoLidas and historico variables from storage (already loaded above)
+
+      // start heartbeat: re-publica "online" periodicamente (ajuda detecção em alguns ambientes)
+      if (hbTimer) clearInterval(hbTimer);
+      hbTimer = setInterval(() => {
+        if (client && client.connected) {
+          client.publish(`XzzXminichat2025/presenca/${usuarioSafe}`, "online", { retain:true });
+        }
+      }, 20000); // 20s - ajuste se quiser
     });
+
+    // limpar heartbeat quando conexão fechar
+    client.on("close", () => {
+      if (hbTimer) { clearInterval(hbTimer); hbTimer = null; }
+    });
+    // tenta publicar "offline" ao fechar a aba (quando o navegador permitir)
+    window.addEventListener('beforeunload', () => {
+      try {
+        if (client && client.connected) {
+          client.publish(`XzzXminichat2025/presenca/${usuarioSafe}`, "offline", { retain:true });
+          // opcional: client.end(true)  // encerra cliente limpamente (pode impedir LWT, mas ok ao fechar)
+        }
+      } catch(e) { /* ignore */ }
+    });
+
+    // opcional: log de offline quando desconectar (útil para debug)
+    // client.on("offline", ()=> console.log("cliente offline"));
+
 
     // ==============================
     // Mensagens recebidas
@@ -547,9 +594,18 @@
     }
 
     function trocarUsuario() {
+      // publica offline antes de trocar usuário
+      try {
+        if (client && client.connected) {
+          client.publish(`XzzXminichat2025/presenca/${usuarioSafe}`, "offline", { retain:true });
+          client.end(true); // encerra a conexão de forma limpa
+        }
+      } catch(e) { /* ignore */ }
+
       localStorage.clear();
       location.reload();
     }
+
 
     // ==============================
     // ACKs: on opening conversation, send read acks for messages addressed to me
