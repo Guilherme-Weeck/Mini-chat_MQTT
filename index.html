@@ -403,7 +403,7 @@
       const msgId = Date.now() + "-" + Math.random().toString(36).slice(2,7);
 
       // salvar localmente como 'sent' (aparecerá no chat)
-      salvarMensagem(destinoAtual, { id: msgId, autor: "eu", msg: texto, hora: hora, status: "sent" });
+      salvarMensagem(destinoAtual, { id: msgId, autor: usuario, msg: texto, hora: hora, status: "sent" });
       renderHistorico(destinoAtual);
 
       // publicar mensagem no tópico: autor|texto|hora|id
@@ -478,7 +478,7 @@
       const msgs = historico[contato] || [];
       msgs.forEach(m => {
         const div = document.createElement("div");
-        div.className = "msg " + (m.autor === "eu" ? "me" : "other");
+        div.className = "msg " + (m.autor === usuario ? "me" : "other");
 
         // corpo do texto
         const corpo = document.createElement("div");
@@ -640,7 +640,7 @@
     function enviarReadAcksParaContato(contato) {
       const msgs = historico[contato] || [];
       msgs.forEach(m => {
-        if (m.autor !== "eu" && m.status !== "read") {
+        if (m.autor !== usuario && m.status !== "read") {
           // send read ack for the message id
           client.publish(topicoAtual, "__ACK__|read|" + m.id + "|" + usuario);
           // mark locally as read (the sender will receive this and update status)
