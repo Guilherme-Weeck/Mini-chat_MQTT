@@ -229,6 +229,13 @@
 
 
       renderConversas();
+      // assina todos os tópicos de conversas conhecidas
+      conversas.forEach(c => {
+        const nomes = [usuario, c].sort().join("_");
+        const t = `XzzXminichat2025/usuarios/${nomes}`;
+        client.subscribe(t);
+      });
+
 
       // start heartbeat: re-publica "online" periodicamente (ajuda detecção em alguns ambientes)
       if (hbTimer) clearInterval(hbTimer);
@@ -300,6 +307,10 @@
         if (!conversas.includes(autor)) {
           conversas.push(autor);
           localStorage.setItem("conversas", JSON.stringify(conversas));
+
+          // 🔹 inscrever-se no tópico desta conversa para receber futuras mensagens
+          const nomes = [usuario, autor].sort().join("_");
+          client.subscribe(`XzzXminichat2025/usuarios/${nomes}`);
         }
 
         // salvar msg vindo de autor
@@ -455,22 +466,25 @@
     }
 
     function marcarStatusLocal(msgId, tipo) {
-    for (const contato in historico) {
-      const msgs = historico[contato] || [];
-      for (let m of msgs) {
-        if (m.id === msgId) {
-          if (tipo === "delivered" && m.status === "sent") {
-            m.status = "delivered";
-          } else if (tipo === "read") {
-            m.status = "read";
+      for (const contato in historico) {
+        const msgs = historico[contato] || [];
+        for (let m of msgs) {
+          if (m.id === msgId) {
+            // só muda status das mensagens que eu enviei
+            if (m.autor === usuario) {
+              if (tipo === "delivered" && m.status === "sent") {
+                m.status = "delivered";
+              } else if (tipo === "read") {
+                m.status = "read";
+              }
+              localStorage.setItem("historico", JSON.stringify(historico));
+              if (contato === destinoAtual) renderHistorico(destinoAtual);
+            }
+            return;
           }
-          localStorage.setItem("historico", JSON.stringify(historico));
-          if (contato === destinoAtual) renderHistorico(destinoAtual);
-          return;
         }
       }
     }
-  }
 
     function renderHistorico(contato) {
       const chat = document.getElementById("chat");
