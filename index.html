@@ -296,57 +296,55 @@
       }
       // conversa
       if (topic.startsWith("XzzXminichat2025/usuarios/")) {
-        // payload formats:
-        // normal message: <autor>|<texto>|<hora>|<msgId>
-        // ack message: __ACK__|<type>|<msgId>|<reader>
-        const parts = message.split("|");
+        const parts = message.toString().split("|");
         const autor = parts[0];
-        if (autor === "__ACK__") {
-          const tipo = parts[1]; // delivered|read
-          const msgId = parts[2];
-          const reader = parts[3];
-          // atualiza status da mensagem local (se existir)
-          marcarStatusLocal(msgId, tipo);
-          return;
-        }
         const texto = parts[1] || "";
         const hora = parts[2] || new Date().toLocaleTimeString([], {hour:"2-digit", minute:"2-digit"});
         const msgId = parts[3] || (Date.now()+"-"+Math.random().toString(36).slice(2,7));
 
-        // se a mensagem veio de mim mesmo, ignorar (já mostrada localmente)
-        if (autor === usuario) return;
-        
-        // se o autor me enviou algo e ele não está na lista de conversas, recria automaticamente
-        if (!conversas.includes(autor)) {
-          conversas.push(autor);
-          
-          localStorage.setItem("conversas", JSON.stringify(conversas));
-
-          // 🔹 inscrever-se no tópico desta conversa para receber futuras mensagens
-          const nomes = [usuario, autor].sort().join("_");
-          client.subscribe(`XzzXminichat2025/usuarios/${nomes}`);
-          renderConversas();
+        // ACKs
+        if (autor === "__ACK__") {
+          const tipo = parts[1]; // delivered|read
+          const msgIdAck = parts[2];
+          marcarStatusLocal(msgIdAck, tipo);
+          return;
         }
 
-        // salvar msg vindo de autor
-        salvarMensagem(autor, { id: msgId, autor: autor, msg: texto, hora: hora, status: "delivered" });
-        // enviar ack de delivered (notifica remetente mesmo se conversa não estiver aberta)
-        setTimeout(()=> {
+        // ignora minhas próprias mensagens
+        if (autor === usuario) return;
+
+        // se for um contato novo, adiciona automaticamente
+        if (!conversas.includes(autor)) {
+          conversas.push(autor);
+          localStorage.setItem("conversas", JSON.stringify(conversas));
+          renderConversas();
+
+          // e já se inscreve no tópico da conversa
+          const nomes = [usuario, autor].sort().join("_");
+          client.subscribe(`XzzXminichat2025/usuarios/${nomes}`);
+        }
+
+        // salva e mostra a mensagem
+        salvarMensagem(autor, { id: msgId, autor, msg: texto, hora, status: "delivered" });
+
+        // envia ack de entregue
+        setTimeout(() => {
           const nomes = [autor, usuario].sort().join("_");
-          const topico = `XzzXminichat2025/usuarios/${nomes}`;
-          client.publish(topico, "__ACK__|delivered|" + msgId + "|" + usuario);
+          const t = `XzzXminichat2025/usuarios/${nomes}`;
+          client.publish(t, `__ACK__|delivered|${msgId}|${usuario}`);
         }, 100);
 
-        if (autor !== destinoAtual) {
+        // mostra no chat ou notifica
+        if (autor === destinoAtual) {
+          renderHistorico(destinoAtual);
+          enviarReadAcksParaContato(autor);
+        } else {
           incrementarNaoLidas(autor);
           renderConversas();
           notificarNovaMensagem(autor, texto);
-        } else {
-          renderHistorico(destinoAtual);
-          // já que abriu a conversa, enviar read ack
-          enviarReadAcksParaContato(autor);
         }
       }
+
       // histórico vindo do broker — mescla sem perder status locais
       if (topic.startsWith("XzzXminichat2025/historico/")) {
         try {
