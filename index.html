@@ -306,6 +306,7 @@
         // se o autor me enviou algo e ele não está na lista de conversas, recria automaticamente
         if (!conversas.includes(autor)) {
           conversas.push(autor);
+          renderConversas();
           localStorage.setItem("conversas", JSON.stringify(conversas));
 
           // 🔹 inscrever-se no tópico desta conversa para receber futuras mensagens
@@ -502,10 +503,18 @@
               } else if (tipo === "read") {
                 m.status = "read";
               }
+
+              // salva e atualiza a interface
               localStorage.setItem("historico", JSON.stringify(historico));
-              if (contato === destinoAtual) renderHistorico(destinoAtual);
+
+              if (contato === destinoAtual) {
+                renderHistorico(destinoAtual);
+              }
+
+              // 🔹 atualiza a lista de conversas (para refletir os checks)
+              renderConversas();
             }
-            return;
+            return; // sai da função assim que encontrar o msgId
           }
         }
       }
@@ -531,7 +540,7 @@
         hora.textContent = m.hora;
         footer.appendChild(hora);
 
-        if (m.autor === "eu") {
+        if (m.autor === usuario {
           const st = document.createElement("span");
           st.textContent = (m.status === "read" ? "✓✓" : (m.status === "delivered" ? "✓" : ""));
           footer.appendChild(st);
