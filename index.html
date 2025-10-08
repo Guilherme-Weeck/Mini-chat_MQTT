@@ -220,43 +220,43 @@
       console.log("conectado");
 
       // publica PRESENÇA "online" (retain)
-      client.publish(`XzzXminichat2025/presenca/${usuarioSafe}`, "online", { retain: true });
+      client.publish(`XzzXminichat2025/presenca/${usuarioSafe}`, "online", { retain:true });
 
       // inscrever convites e presença
       client.subscribe(`XzzXminichat2025/convites/${usuario}`);
       client.subscribe("XzzXminichat2025/presenca/#");
 
-      // 🔹 assinar apenas históricos que envolvam o usuário atual
+      // 🔹 Assinar automaticamente qualquer conversa direta que envolva este usuário
+      client.subscribe(`XzzXminichat2025/usuarios/${usuario}_#`);
+      client.subscribe(`XzzXminichat2025/usuarios/#_${usuario}`);
+
+      // 🔹 Assinar históricos que envolvam este usuário
       client.subscribe(`XzzXminichat2025/historico/${usuario}_#`);
       client.subscribe(`XzzXminichat2025/historico/#_${usuario}`);
 
-      // 🔹 força o broker a entregar históricos retidos já existentes
+      // 🔹 Forçar entrega de mensagens retidas
       setTimeout(() => {
         console.log("Solicitando históricos retidos...");
         client.publish(`XzzXminichat2025/historico/${usuario}_ping`, "ping");
       }, 1000);
 
-      // 🔹 assina também todos os tópicos de mensagens diretas que envolvam o usuário
-      client.subscribe(`XzzXminichat2025/usuarios/${usuario}_#`);
-      client.subscribe(`XzzXminichat2025/usuarios/#_${usuario}`);
-
-      // 🔹 assina todos os tópicos de conversas conhecidas
+      // 🔹 Assinar todas as conversas conhecidas do localStorage
       conversas.forEach(c => {
         const nomes = [usuario, c].sort().join("_");
-        const t = `XzzXminichat2025/usuarios/${nomes}`;
-        client.subscribe(t);
+        client.subscribe(`XzzXminichat2025/usuarios/${nomes}`);
       });
 
       renderConversas();
 
-      // 🔹 heartbeat: reenvia presença "online" periodicamente
+      // 🔹 Heartbeat para manter status online
       if (hbTimer) clearInterval(hbTimer);
       hbTimer = setInterval(() => {
         if (client && client.connected) {
-          client.publish(`XzzXminichat2025/presenca/${usuarioSafe}`, "online", { retain: true });
+          client.publish(`XzzXminichat2025/presenca/${usuarioSafe}`, "online", { retain:true });
         }
-      }, 20000); // 20s
+      }, 20000);
     });
+
 
 
     // limpar heartbeat quando conexão fechar
