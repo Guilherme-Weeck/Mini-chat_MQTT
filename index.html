@@ -332,23 +332,48 @@
           enviarReadAcksParaContato(autor);
         }
       }
-      // histórico vindo do broker
+      // histórico vindo do broker — mescla sem perder status locais
       if (topic.startsWith("XzzXminichat2025/historico/")) {
         try {
           const nomes = topic.split("/").pop().split("_");
           const outro = nomes.find(n => n !== usuario);
-          const histJson = message.toString();
-          const dados = JSON.parse(histJson);
-          if (Array.isArray(dados)) {
-            historico[outro] = dados;
-            localStorage.setItem("historico", JSON.stringify(historico));
-            if (destinoAtual === outro) renderHistorico(outro);
-          }
-        } catch(e) {
+          const dados = JSON.parse(message.toString());
+          if (!Array.isArray(dados)) return;
+
+          const local = historico[outro] || [];
+          // map local por id para preservar status
+          const mapLocal = {};
+          local.forEach(m => { if (m && m.id) mapLocal[m.id] = m; });
+
+          // mescla: usa os dados remotos como base, preserva status local se existir
+          const merged = dados.map(d => {
+            if (d && d.id && mapLocal[d.id] && mapLocal[d.id].status) {
+              d.status = mapLocal[d.id].status;
+            }
+            return d;
+          });
+
+          // inclui mensagens locais que ainda não existam no remoto
+          local.forEach(l => {
+            if (!merged.find(m => m.id === l.id)) merged.push(l);
+          });
+
+          // ordenar por id (o id que usamos tem timestamp, então ordem lexicográfica funciona)
+          merged.sort((a,b) => {
+            if (a.id && b.id) return String(a.id).localeCompare(String(b.id));
+            return 0;
+          });
+
+          historico[outro] = merged;
+          localStorage.setItem("historico", JSON.stringify(historico));
+          if (destinoAtual === outro) renderHistorico(outro);
+
+        } catch (e) {
           console.error("Erro ao ler histórico remoto", e);
         }
         return;
       }
+
     });
 
     // ==============================
