@@ -361,11 +361,6 @@
           const outro = nomes.find(n => n !== usuario);
           const dados = JSON.parse(message.toString());
           if (!Array.isArray(dados)) return;
-        try {
-          const nomes = topic.split("/").pop().split("_");
-          const outro = nomes.find(n => n !== usuario);
-          const dados = JSON.parse(message.toString());
-          if (!Array.isArray(dados)) return;
 
           const local = historico[outro] || [];
           // map local por id para preservar status
