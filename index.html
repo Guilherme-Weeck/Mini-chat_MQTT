@@ -359,6 +359,7 @@
         try {
           const nomes = nomesTopico.split("_");
           const outro = nomes.find(n => n !== usuario);
+          if (!texto.startsWith("{") && !texto.startsWith("[")) return; // ignora "ping" etc.
           const dados = JSON.parse(message.toString());
           if (!Array.isArray(dados)) return;
 
