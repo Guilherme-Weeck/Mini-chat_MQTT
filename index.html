@@ -302,7 +302,7 @@
         const hora = parts[2] || new Date().toLocaleTimeString([], {hour:"2-digit", minute:"2-digit"});
         const msgId = parts[3] || (Date.now()+"-"+Math.random().toString(36).slice(2,7));
 
-        // ACKs
+        // se for um ACK
         if (autor === "__ACK__") {
           const tipo = parts[1]; // delivered|read
           const msgIdAck = parts[2];
@@ -313,28 +313,31 @@
         // ignora minhas próprias mensagens
         if (autor === usuario) return;
 
-        // se for um contato novo, adiciona automaticamente
+        // 🔹 se o contato ainda não existe localmente, cria automaticamente
         if (!conversas.includes(autor)) {
           conversas.push(autor);
           localStorage.setItem("conversas", JSON.stringify(conversas));
+          historico[autor] = []; // cria histórico vazio
+          localStorage.setItem("historico", JSON.stringify(historico));
+
           renderConversas();
 
-          // e já se inscreve no tópico da conversa
+          // garante inscrição no tópico correto (caso não exista)
           const nomes = [usuario, autor].sort().join("_");
           client.subscribe(`XzzXminichat2025/usuarios/${nomes}`);
         }
 
-        // salva e mostra a mensagem
+        // 🔹 salva a mensagem recebida
         salvarMensagem(autor, { id: msgId, autor, msg: texto, hora, status: "delivered" });
 
-        // envia ack de entregue
+        // 🔹 envia ACK de recebido
         setTimeout(() => {
           const nomes = [autor, usuario].sort().join("_");
           const t = `XzzXminichat2025/usuarios/${nomes}`;
           client.publish(t, `__ACK__|delivered|${msgId}|${usuario}`);
-        }, 100);
+        }, 150);
 
-        // mostra no chat ou notifica
+        // 🔹 atualiza UI conforme o chat está aberto ou não
         if (autor === destinoAtual) {
           renderHistorico(destinoAtual);
           enviarReadAcksParaContato(autor);
