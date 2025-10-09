@@ -178,575 +178,307 @@
   </div>
 
   <script>
-    // ==============================
-    // Inicialização
-    // ==============================
-    let usuario = localStorage.getItem("usuario");
-    if (!usuario) {
-      usuario = prompt("Digite seu nome de usuário:") || "anonimo_" + Math.floor(Math.random()*1000);
-      localStorage.setItem("usuario", usuario);
+  // ==============================
+  // Inicialização
+  // ==============================
+  let usuario = localStorage.getItem("usuario");
+  if (!usuario) {
+    usuario = prompt("Digite seu nome de usuário:") || "anonimo_" + Math.floor(Math.random()*1000);
+    localStorage.setItem("usuario", usuario);
+  }
+  document.getElementById("username").textContent = usuario;
+  const usuarioSafe = String(usuario).replace(/\s+/g, '_').replace(/[^\w\-]/g, '').slice(0,40);
+
+  // Dados locais
+  let conversas = JSON.parse(localStorage.getItem("conversas") || "[]");
+  let historico = JSON.parse(localStorage.getItem("historico") || "{}");
+  let naoLidas = JSON.parse(localStorage.getItem("naoLidas") || "{}");
+  let statusUsuarios = {};
+  let topicoAtual = null;
+  let destinoAtual = null;
+
+  // conectar MQTT
+  const opts = {
+    clientId: 'minichat_' + usuarioSafe + '_' + Math.random().toString(16).slice(2,6),
+    keepalive: 15,
+    clean: true,
+    will: {
+      topic: `XzzXminichat2025/presenca/${usuarioSafe}`,
+      payload: 'offline',
+      qos: 1,
+      retain: true
     }
-    document.getElementById("username").textContent = usuario;
-    // versão segura do usuário (usada nos tópicos de presença)
-    const usuarioSafe = String(usuario).replace(/\s+/g, '_').replace(/[^\w\-]/g, '').slice(0,40);
+  };
+  const client = mqtt.connect("wss://broker.hivemq.com:8884/mqtt", opts);
 
+  let hbTimer = null;
 
-    // Dados locais
-    let conversas = JSON.parse(localStorage.getItem("conversas") || "[]");
-    let historico = JSON.parse(localStorage.getItem("historico") || "{}"); // { contato: [ {id, autor, msg, hora, status} ] }
-    let naoLidas = JSON.parse(localStorage.getItem("naoLidas") || "{}");
-    let statusUsuarios = {}; // presença
-    let topicoAtual = null;
-    let destinoAtual = null;
+  client.on("connect", () => {
+    console.log("Conectado como", usuario);
 
-    // conectar mqtt com LWT + keepalive + heartbeat
-    const opts = {
-      clientId: 'minichat_' + usuarioSafe + '_' + Math.random().toString(16).slice(2,6),
-      keepalive: 15,       // detecta desconexão em ~15s (ajuste se quiser)
-      clean: true,         // aqui mantemos sessão limpa; para filas persistentes use clean:false
-      will: {
-        topic: `XzzXminichat2025/presenca/${usuarioSafe}`,
-        payload: 'offline',
-        qos: 1,
-        retain: true
-      }
-    };
+    // presença
+    client.publish(`XzzXminichat2025/presenca/${usuarioSafe}`, "online", { retain:true });
+    client.subscribe(`XzzXminichat2025/convites/${usuario}`);
+    client.subscribe("XzzXminichat2025/presenca/#");
 
-    const client = mqtt.connect("wss://broker.hivemq.com:8884/mqtt", opts);
+    // 🔹 Novo modelo: assina tudo e filtra pelo nome local
+    client.subscribe("XzzXminichat2025/usuarios/#");
+    client.subscribe("XzzXminichat2025/historico/#");
 
-    let hbTimer = null; // heartbeat interval handle
-
-    client.on("connect", () => {
-      console.log("conectado");
-
-      // publica PRESENÇA "online" (retain)
-      client.publish(`XzzXminichat2025/presenca/${usuarioSafe}`, "online", { retain:true });
-
-      // inscrever convites e presença
-      client.subscribe(`XzzXminichat2025/convites/${usuario}`);
-      client.subscribe("XzzXminichat2025/presenca/#");
-
-      // 🔹 Assinar automaticamente qualquer conversa direta que envolva este usuário
-      client.subscribe(`XzzXminichat2025/usuarios/${usuario}_#`);
-      client.subscribe(`XzzXminichat2025/usuarios/#_${usuario}`);
-
-      // 🔹 Assinar históricos que envolvam este usuário
-      client.subscribe(`XzzXminichat2025/historico/${usuario}_#`);
-      client.subscribe(`XzzXminichat2025/historico/#_${usuario}`);
-
-      // 🔹 Forçar entrega de mensagens retidas
-      setTimeout(() => {
-        console.log("Solicitando históricos retidos...");
-        client.publish(`XzzXminichat2025/historico/${usuario}_ping`, "ping");
-      }, 1000);
-
-      // 🔹 Assinar todas as conversas conhecidas do localStorage
-      conversas.forEach(c => {
-        const nomes = [usuario, c].sort().join("_");
-        client.subscribe(`XzzXminichat2025/usuarios/${nomes}`);
-      });
-
-      renderConversas();
-
-      // 🔹 Heartbeat para manter status online
-      if (hbTimer) clearInterval(hbTimer);
-      hbTimer = setInterval(() => {
-        if (client && client.connected) {
-          client.publish(`XzzXminichat2025/presenca/${usuarioSafe}`, "online", { retain:true });
-        }
-      }, 20000);
-    });
-
-
-
-    // limpar heartbeat quando conexão fechar
-    client.on("close", () => {
-      if (hbTimer) { clearInterval(hbTimer); hbTimer = null; }
-    });
-    // tenta publicar "offline" ao fechar a aba (quando o navegador permitir)
-    window.addEventListener('beforeunload', () => {
-      try {
-        if (client && client.connected) {
-          client.publish(`XzzXminichat2025/presenca/${usuarioSafe}`, "offline", { retain:true });
-          // opcional: client.end(true)  // encerra cliente limpamente (pode impedir LWT, mas ok ao fechar)
-        }
-      } catch(e) { /* ignore */ }
-    });
-
-    // opcional: log de offline quando desconectar (útil para debug)
-    // client.on("offline", ()=> console.log("cliente offline"));
-
-
-    // ==============================
-    // Mensagens recebidas
-    // ==============================
-    client.on("message", (topic, messageBuf) => {
-      const message = messageBuf.toString();
-      // convite
-      if (topic.startsWith("XzzXminichat2025/convites/")) {
-        abrirConversa(message);
-        return;
-      }
-      // presença
-      if (topic.startsWith("XzzXminichat2025/presenca/")) {
-        const u = topic.split("/").pop();
-        statusUsuarios[u] = message;
-        renderConversas();
-        return;
-      }
-      // conversa
-      if (topic.startsWith("XzzXminichat2025/usuarios/")) {
-        const parts = message.toString().split("|");
-        const autor = parts[0];
-        const texto = parts[1] || "";
-        const hora = parts[2] || new Date().toLocaleTimeString([], {hour:"2-digit", minute:"2-digit"});
-        const msgId = parts[3] || (Date.now()+"-"+Math.random().toString(36).slice(2,7));
-
-        // se for um ACK
-        if (autor === "__ACK__") {
-          const tipo = parts[1]; // delivered|read
-          const msgIdAck = parts[2];
-          marcarStatusLocal(msgIdAck, tipo);
-          return;
-        }
-
-        // ignora minhas próprias mensagens
-        if (autor === usuario) return;
-
-        // 🔹 se o contato ainda não existe localmente, cria automaticamente
-        if (!conversas.includes(autor)) {
-          conversas.push(autor);
-          localStorage.setItem("conversas", JSON.stringify(conversas));
-          historico[autor] = []; // cria histórico vazio
-          localStorage.setItem("historico", JSON.stringify(historico));
-
-          renderConversas();
-
-          // garante inscrição no tópico correto (caso não exista)
-          const nomes = [usuario, autor].sort().join("_");
-          client.subscribe(`XzzXminichat2025/usuarios/${nomes}`);
-        }
-
-        // 🔹 salva a mensagem recebida
-        salvarMensagem(autor, { id: msgId, autor, msg: texto, hora, status: "delivered" });
-
-        // 🔹 envia ACK de recebido
-        setTimeout(() => {
-          const nomes = [autor, usuario].sort().join("_");
-          const t = `XzzXminichat2025/usuarios/${nomes}`;
-          client.publish(t, `__ACK__|delivered|${msgId}|${usuario}`);
-        }, 150);
-
-        // 🔹 atualiza UI conforme o chat está aberto ou não
-        if (autor === destinoAtual) {
-          renderHistorico(destinoAtual);
-          enviarReadAcksParaContato(autor);
-        } else {
-          incrementarNaoLidas(autor);
-          renderConversas();
-          notificarNovaMensagem(autor, texto);
-        }
-      }
-
-      // histórico vindo do broker — mescla sem perder status locais
-      if (topic.startsWith("XzzXminichat2025/historico/")) {
-        try {
-          const nomes = topic.split("/").pop().split("_");
-          const outro = nomes.find(n => n !== usuario);
-          const dados = JSON.parse(message.toString());
-          if (!Array.isArray(dados)) return;
-
-          const local = historico[outro] || [];
-          // map local por id para preservar status
-          const mapLocal = {};
-          local.forEach(m => { if (m && m.id) mapLocal[m.id] = m; });
-
-          // mescla: usa os dados remotos como base, preserva status local se existir
-          const merged = dados.map(d => {
-            if (d && d.id && mapLocal[d.id] && mapLocal[d.id].status) {
-              d.status = mapLocal[d.id].status;
-            }
-            return d;
-          });
-
-          // inclui mensagens locais que ainda não existam no remoto
-          local.forEach(l => {
-            if (!merged.find(m => m.id === l.id)) merged.push(l);
-          });
-
-          // ordenar por id (o id que usamos tem timestamp, então ordem lexicográfica funciona)
-          merged.sort((a,b) => {
-            if (a.id && b.id) return String(a.id).localeCompare(String(b.id));
-            return 0;
-          });
-
-          historico[outro] = merged;
-          localStorage.setItem("historico", JSON.stringify(historico));
-          if (destinoAtual === outro) renderHistorico(outro);
-
-         // atualizar UI
-        renderConversas();
-
-        } catch (e) {
-          console.error("Erro ao ler histórico remoto", e);
-        }
-        return;
-      }
-
-    });
-
-    // ==============================
-    // Funções de conversa / UI
-    // ==============================
-    function iniciarConversa(destino) {
-      if (!destino) return;
-      abrirConversa(destino);
-      client.publish("XzzXminichat2025/convites/" + destino, usuario);
-    }
-
-    function abrirConversa(destino) {
-      destinoAtual = destino;
-      const nomes = [usuario, destino].sort().join("_");
-      topicoAtual = `XzzXminichat2025/usuarios/${nomes}`;
-
-      client.subscribe(topicoAtual);
-      document.getElementById("chatTitle").textContent = destino + " " + (statusUsuarios[destino]==="online"?"🟢":"⚪");
-      document.getElementById("inputArea").style.display = "flex";
-      document.getElementById("backBtn").style.display = "inline";
-      document.getElementById("menuBtn").style.display = "none";
-      renderHistorico(destino);
-
-      if (!conversas.includes(destino)) {
-        conversas.push(destino);
-        localStorage.setItem("conversas", JSON.stringify(conversas));
-      }
-      naoLidas[destino] = 0;
-      localStorage.setItem("naoLidas", JSON.stringify(naoLidas));
-      renderConversas();
-
-      // fechar sidebar no mobile
-      if (window.innerWidth <= 768) {
-        document.getElementById("sidebar").style.display = "none";
-      }
-
-      // enviar read acks (marcar mensagens recebidas como lidas)
-      enviarReadAcksParaContato(destino);
-
-      // focus input and scroll to bottom
-      setTimeout(()=> { focusInputAndScroll(); }, 200);
-    }
-
-    function fecharConversa() {
-      destinoAtual = null;
-      topicoAtual = null;
-      document.getElementById("chatTitle").textContent = "MiniChat";
-      document.getElementById("chat").innerHTML = "";
-      document.getElementById("inputArea").style.display = "none";
-      document.getElementById("backBtn").style.display = "none";
-      document.getElementById("menuBtn").style.display = "inline";
-    }
-
-    // ==============================
-    // Enviar mensagem (com id e hora)
-    // ==============================
-    function enviarMensagem() {
-      const input = document.getElementById("msg");
-      const texto = input.value.trim();
-      if (!texto || !topicoAtual || !destinoAtual) return;
-
-      const hora = new Date().toLocaleTimeString([], {hour:"2-digit", minute:"2-digit"});
-      const msgId = Date.now() + "-" + Math.random().toString(36).slice(2,7);
-
-      // salvar localmente como 'sent' (aparecerá no chat)
-      salvarMensagem(destinoAtual, { id: msgId, autor: usuario, msg: texto, hora: hora, status: "sent" });
-      renderHistorico(destinoAtual);
-
-      // publicar mensagem no tópico: autor|texto|hora|id
-      client.publish(topicoAtual, usuario + "|" + texto + "|" + hora + "|" + msgId);
-
-      // 🔹 publica histórico atualizado (JSON) no tópico historico
-      const nomes = [usuario, destinoAtual].sort().join("_");
-      const topicoHist = `XzzXminichat2025/historico/${nomes}`;
-      client.publish(topicoHist, JSON.stringify(historico[destinoAtual] || []), { retain: true });
-
-      input.value = "";
-      setTimeout(()=> { focusInputAndScroll(); }, 50);
-    }
-
-    // Enter behaviour: enviar no desktop com Enter (Shift+Enter -> nova linha)
-    const msgInput = document.getElementById("msg");
-    msgInput.addEventListener("keydown", (e) => {
-      if (e.key === "Enter" && !e.shiftKey) {
-        // on mobile Enter sometimes inserts lines; keep behaviour: send on Enter except when Shift held
-        e.preventDefault();
-        enviarMensagem();
-      }
-    });
-
-    // quando campo recebe foco, rola para final (evita que teclado esconda últimas mensagens)
-    msgInput.addEventListener("focus", () => {
-      setTimeout(()=> {
-        const chat = document.getElementById("chat");
-        chat.scrollTop = chat.scrollHeight;
-      }, 300);
-    });
-
-    function focusInputAndScroll() {
-      const input = document.getElementById("msg");
-      input.focus({preventScroll:true});
-      setTimeout(()=> {
-        const chat = document.getElementById("chat");
-        chat.scrollTop = chat.scrollHeight;
-      }, 200);
-    }
-
-    // ==============================
-    // Persistência: salvar / render historico
-    // ==============================
-    function salvarMensagem(contato, msgObj) {
-      if (!historico[contato]) historico[contato] = [];
-      historico[contato].push(msgObj);
-      localStorage.setItem("historico", JSON.stringify(historico));
-    }
-
-    function marcarStatusLocal(msgId, tipo) {
-      for (const contato in historico) {
-        const msgs = historico[contato] || [];
-        for (let m of msgs) {
-          if (m.id === msgId) {
-            // só muda status das mensagens que eu enviei
-            if (m.autor === usuario) {
-              if (tipo === "delivered" && m.status === "sent") {
-                m.status = "delivered";
-              } else if (tipo === "read") {
-                m.status = "read";
-              }
-
-              // salva e atualiza a interface
-              localStorage.setItem("historico", JSON.stringify(historico));
-
-              if (contato === destinoAtual) {
-                renderHistorico(destinoAtual);
-              }
-
-              // 🔹 atualiza a lista de conversas (para refletir os checks)
-              renderConversas();
-            }
-            return; // sai da função assim que encontrar o msgId
-          }
-        }
-      }
-    }
-
-    function renderHistorico(contato) {
-      const chat = document.getElementById("chat");
-      chat.innerHTML = "";
-      const msgs = historico[contato] || [];
-      msgs.forEach(m => {
-        const div = document.createElement("div");
-        div.className = "msg " + (m.autor === usuario ? "me" : "other");
-
-        // corpo do texto
-        const corpo = document.createElement("div");
-        corpo.textContent = m.msg;
-
-        // rodapé (hora + status)
-        const footer = document.createElement("div");
-        footer.className = "msg-footer";
-
-        const hora = document.createElement("span");
-        hora.textContent = m.hora;
-        footer.appendChild(hora);
-
-        if (m.autor === usuario) {
-          const st = document.createElement("span");
-          st.textContent = (m.status === "read" ? "✓✓" : (m.status === "delivered" ? "✓" : ""));
-          footer.appendChild(st);
-        }
-
-        div.appendChild(corpo);
-        div.appendChild(footer);
-        chat.appendChild(div);
-      });
-      setTimeout(()=> { chat.scrollTop = chat.scrollHeight; }, 50);
-    }
-
-
-    // escape minimal HTML to prevent injection if someone types <> etc.
-    function escapeHtml(str) {
-      return str.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-    }
-
-    // ==============================
-    // Conversas list / nao lidas
-    // ==============================
-    function renderConversas() {
-      const lista = document.getElementById("conversas");
-      lista.innerHTML = "";
-      conversas.forEach(c => {
-        const div = document.createElement("div");
-        div.className = "contato";
-
-        const left = document.createElement("div");
-        left.innerHTML = `<div class="nome">${c} ${(statusUsuarios[c]==="online")?"🟢":"⚪"}</div>` +
-                          ((historico[c] && historico[c].length) 
-                            ? `<div class="sub">${shortPreview(historico[c].slice(-1)[0].msg)}</div>` : "");
-        left.style.flex = "1";
-        left.onclick = () => abrirConversa(c);
-
-        const right = document.createElement("div");
-        right.style.display = "flex";
-        right.style.alignItems = "center";
-        right.style.gap = "6px";
-
-        if ((naoLidas[c] || 0) > 0) {
-          const badge = document.createElement("span");
-          badge.className = "badge";
-          badge.textContent = naoLidas[c];
-          right.appendChild(badge);
-        }
-
-        // botão remover
-        const btn = document.createElement("button");
-        btn.textContent = "❌";
-        btn.style.border = "none";
-        btn.style.background = "transparent";
-        btn.style.cursor = "pointer";
-        btn.title = "Remover contato";
-        btn.onclick = (e) => {
-          e.stopPropagation(); // evita abrir conversa ao clicar
-          removerContato(c);
-        };
-        right.appendChild(btn);
-
-        div.appendChild(left);
-        div.appendChild(right);
-        lista.appendChild(div);
-      });
-    }
-
-    function shortPreview(text) {
-      if (!text) return "";
-      text = text.replace(/\n/g, " ");
-      return text.length > 32 ? text.slice(0,29) + "..." : text;
-    }
-
-    function incrementarNaoLidas(contato) {
-      naoLidas[contato] = (naoLidas[contato] || 0) + 1;
-      localStorage.setItem("naoLidas", JSON.stringify(naoLidas));
-    }
-
-    // ==============================
-    // Notificações
-    // ==============================
-    function notificarNovaMensagem(remetente, texto) {
-      // desktop notifications
-      if (Notification.permission === "granted") {
-        new Notification("Nova mensagem de " + remetente, { body: texto, icon: "https://cdn-icons-png.flaticon.com/512/1384/1384031.png" });
-      } else if (Notification.permission !== "denied") {
-        Notification.requestPermission();
-      }
-      // sound
-      try {
-        new Audio("https://notificationsounds.com/storage/sounds/file-sounds-1152-pristine.mp3").play();
-      } catch (e) { /* ignore */ }
-    }
-
-    // ==============================
-    // Emoji picker
-    // ==============================
-    function toggleEmojiPicker() {
-      const p = document.getElementById("emojiPicker");
-      p.style.display = (p.style.display === "flex" || p.style.display === "block") ? "none" : "flex";
-    }
-    function inserirEmoji(e) {
-      const input = document.getElementById("msg");
-      input.value += e;
-      input.focus();
-      toggleEmojiPicker();
-    }
-
-    // helper alias used earlier
-    function adicionarEmoji(e){ inserirEmoji(e); }
-
-    // ==============================
-    // Sidebar helpers & new contact
-    // ==============================
-    function toggleSidebar(){
-      const sb = document.getElementById("sidebar");
-      sb.style.display = (sb.style.display === "block") ? "none" : "block";
-    }
-
-    function novoContato() {
-      const nome = document.getElementById("novoContato").value.trim();
-      if (!nome) return;
-      iniciarConversa(nome);
-      document.getElementById("novoContato").value = "";
-      // fecha sidebar no mobile
-      if (window.innerWidth <= 768) toggleSidebar();
-    }
-
-    function trocarUsuario() {
-      // publica offline antes de trocar usuário
-      try {
-        if (client && client.connected) {
-          client.publish(`XzzXminichat2025/presenca/${usuarioSafe}`, "offline", { retain:true });
-          client.end(true); // encerra a conexão de forma limpa
-        }
-      } catch(e) { /* ignore */ }
-
-      localStorage.clear();
-      location.reload();
-    }
-
-
-    // ==============================
-    // ACKs: on opening conversation, send read acks for messages addressed to me
-    // ==============================
-    function enviarReadAcksParaContato(contato) {
-      const msgs = historico[contato] || [];
-      msgs.forEach(m => {
-        if (m.autor !== usuario && m.status !== "read") {
-          // send read ack for the message id
-          client.publish(topicoAtual, "__ACK__|read|" + m.id + "|" + usuario);
-          // mark locally as read (the sender will receive this and update status)
-          m.status = "read";
-        }
-      });
-      localStorage.setItem("historico", JSON.stringify(historico));
-      // update UI
-      renderHistorico(contato);
-    }
-
-    // mark local message statuses when ack arrives
-    // (marcarStatusLocal already does this)
-
-    // ==============================
-    // Persist initial render
-    // ==============================
     renderConversas();
 
-    // ensure correct scrolling behaviour on orientation / resize
-    window.addEventListener("resize", () => {
-      if (destinoAtual) { setTimeout(()=> { focusInputAndScroll(); }, 200); }
-    });
+    // heartbeat de presença
+    if (hbTimer) clearInterval(hbTimer);
+    hbTimer = setInterval(() => {
+      if (client && client.connected)
+        client.publish(`XzzXminichat2025/presenca/${usuarioSafe}`, "online", { retain:true });
+    }, 20000);
+  });
 
-    function removerContato(nome) {
-      if (!confirm("Remover contato " + nome + "?")) return;
+  client.on("close", () => {
+    if (hbTimer) { clearInterval(hbTimer); hbTimer = null; }
+  });
 
-      conversas = conversas.filter(c => c !== nome);
-      delete historico[nome];
-      delete naoLidas[nome];
+  window.addEventListener('beforeunload', () => {
+    try {
+      if (client && client.connected)
+        client.publish(`XzzXminichat2025/presenca/${usuarioSafe}`, "offline", { retain:true });
+    } catch(e) {}
+  });
 
-      localStorage.setItem("conversas", JSON.stringify(conversas));
-      localStorage.setItem("historico", JSON.stringify(historico));
-      localStorage.setItem("naoLidas", JSON.stringify(naoLidas));
+  // ==============================
+  // Mensagens recebidas
+  // ==============================
+  client.on("message", (topic, messageBuf) => {
+    const message = messageBuf.toString();
 
-      if (destinoAtual === nome) fecharConversa();
-
-      renderConversas();
+    // convite
+    if (topic.startsWith("XzzXminichat2025/convites/")) {
+      abrirConversa(message);
+      return;
     }
 
-  </script>
+    // presença
+    if (topic.startsWith("XzzXminichat2025/presenca/")) {
+      const u = topic.split("/").pop();
+      statusUsuarios[u] = message;
+      renderConversas();
+      return;
+    }
+
+    // 🔹 Conversas diretas
+    if (topic.startsWith("XzzXminichat2025/usuarios/")) {
+      const nomesTopico = topic.split("/").pop();
+      if (!nomesTopico.includes(usuario)) return; // ignora conversas alheias
+      const nomes = nomesTopico.split("_");
+      const outro = nomes.find(n => n !== usuario);
+
+      const parts = message.split("|");
+      const autor = parts[0];
+      const texto = parts[1] || "";
+      const hora = parts[2] || new Date().toLocaleTimeString([], {hour:"2-digit", minute:"2-digit"});
+      const msgId = parts[3] || (Date.now()+"-"+Math.random().toString(36).slice(2,7));
+
+      // ACK recebido
+      if (autor === "__ACK__") {
+        const tipo = parts[1];
+        const msgIdAck = parts[2];
+        marcarStatusLocal(msgIdAck, tipo);
+        return;
+      }
+
+      if (autor === usuario) return; // ignora as próprias
+
+      // cria conversa se ainda não existir
+      if (!conversas.includes(outro)) {
+        conversas.push(outro);
+        localStorage.setItem("conversas", JSON.stringify(conversas));
+        historico[outro] = [];
+        localStorage.setItem("historico", JSON.stringify(historico));
+        renderConversas();
+      }
+
+      // salva mensagem recebida
+      salvarMensagem(outro, { id: msgId, autor, msg: texto, hora, status: "delivered" });
+
+      // envia ACK delivered
+      setTimeout(() => {
+        const t = `XzzXminichat2025/usuarios/${nomes.sort().join("_")}`;
+        client.publish(t, `__ACK__|delivered|${msgId}|${usuario}`);
+      }, 150);
+
+      // atualiza UI
+      if (outro === destinoAtual) {
+        renderHistorico(outro);
+        enviarReadAcksParaContato(outro);
+      } else {
+        incrementarNaoLidas(outro);
+        renderConversas();
+        notificarNovaMensagem(outro, texto);
+      }
+    }
+
+    // 🔹 Histórico (filtrado)
+    if (topic.startsWith("XzzXminichat2025/historico/")) {
+      const nomesTopico = topic.split("/").pop();
+      if (!nomesTopico.includes(usuario)) return; // ignora históricos alheios
+
+      try {
+        const nomes = nomesTopico.split("_");
+        const outro = nomes.find(n => n !== usuario);
+        const dados = JSON.parse(message.toString());
+        if (!Array.isArray(dados)) return;
+
+        const local = historico[outro] || [];
+        const mapLocal = {};
+        local.forEach(m => { if (m && m.id) mapLocal[m.id] = m; });
+
+        const merged = dados.map(d => {
+          if (d && d.id && mapLocal[d.id] && mapLocal[d.id].status)
+            d.status = mapLocal[d.id].status;
+          return d;
+        });
+
+        local.forEach(l => {
+          if (!merged.find(m => m.id === l.id)) merged.push(l);
+        });
+
+        merged.sort((a,b) => String(a.id).localeCompare(String(b.id)));
+
+        historico[outro] = merged;
+        localStorage.setItem("historico", JSON.stringify(historico));
+        if (destinoAtual === outro) renderHistorico(outro);
+        renderConversas();
+      } catch(e) {
+        console.error("Erro ao ler histórico remoto", e);
+      }
+    }
+  });
+
+  // ==============================
+  // Envio e exibição de mensagens
+  // ==============================
+  function enviarMensagem() {
+    const input = document.getElementById("msg");
+    const texto = input.value.trim();
+    if (!texto || !topicoAtual || !destinoAtual) return;
+
+    const hora = new Date().toLocaleTimeString([], {hour:"2-digit", minute:"2-digit"});
+    const msgId = Date.now() + "-" + Math.random().toString(36).slice(2,7);
+
+    salvarMensagem(destinoAtual, { id: msgId, autor: usuario, msg: texto, hora, status: "sent" });
+    renderHistorico(destinoAtual);
+
+    client.publish(topicoAtual, `${usuario}|${texto}|${hora}|${msgId}`);
+
+    const nomes = [usuario, destinoAtual].sort().join("_");
+    const topicoHist = `XzzXminichat2025/historico/${nomes}`;
+    client.publish(topicoHist, JSON.stringify(historico[destinoAtual] || []), { retain:true });
+
+    input.value = "";
+    setTimeout(()=>focusInputAndScroll(),50);
+  }
+
+  // ==============================
+  // Funções auxiliares (checks, histórico, UI)
+  // ==============================
+  function marcarStatusLocal(msgId, tipo) {
+    for (const contato in historico) {
+      const msgs = historico[contato] || [];
+      for (let m of msgs) {
+        if (m.id === msgId && m.autor === usuario) {
+          if (tipo === "delivered" && m.status === "sent") m.status = "delivered";
+          else if (tipo === "read") m.status = "read";
+          localStorage.setItem("historico", JSON.stringify(historico));
+          if (contato === destinoAtual) renderHistorico(destinoAtual);
+          renderConversas();
+          return;
+        }
+      }
+    }
+  }
+
+  function enviarReadAcksParaContato(contato) {
+    const msgs = historico[contato] || [];
+    msgs.forEach(m => {
+      if (m.autor !== usuario && m.status !== "read") {
+        client.publish(topicoAtual, "__ACK__|read|" + m.id + "|" + usuario);
+        m.status = "read";
+      }
+    });
+    localStorage.setItem("historico", JSON.stringify(historico));
+    renderHistorico(contato);
+  }
+
+  function salvarMensagem(contato, msgObj) {
+    if (!historico[contato]) historico[contato] = [];
+    historico[contato].push(msgObj);
+    localStorage.setItem("historico", JSON.stringify(historico));
+  }
+
+  function renderHistorico(contato) {
+    const chat = document.getElementById("chat");
+    chat.innerHTML = "";
+    const msgs = historico[contato] || [];
+    msgs.forEach(m => {
+      const div = document.createElement("div");
+      div.className = "msg " + (m.autor === usuario ? "me" : "other");
+      const corpo = document.createElement("div");
+      corpo.textContent = m.msg;
+      const footer = document.createElement("div");
+      footer.className = "msg-footer";
+      const hora = document.createElement("span");
+      hora.textContent = m.hora + " ";
+      footer.appendChild(hora);
+      if (m.autor === usuario) {
+        const st = document.createElement("span");
+        st.textContent = (m.status === "read" ? "✓✓" : (m.status === "delivered" ? "✓" : ""));
+        footer.appendChild(st);
+      }
+      div.appendChild(corpo);
+      div.appendChild(footer);
+      chat.appendChild(div);
+    });
+    setTimeout(()=>chat.scrollTop=chat.scrollHeight,50);
+  }
+
+  function incrementarNaoLidas(contato){
+    naoLidas[contato]=(naoLidas[contato]||0)+1;
+    localStorage.setItem("naoLidas", JSON.stringify(naoLidas));
+  }
+
+  // ==============================
+  // UI e controle
+  // ==============================
+  function abrirConversa(destino){
+    destinoAtual = destino;
+    const nomes = [usuario, destino].sort().join("_");
+    topicoAtual = `XzzXminichat2025/usuarios/${nomes}`;
+    client.subscribe(topicoAtual);
+    document.getElementById("chatTitle").textContent = destino + " " + (statusUsuarios[destino]==="online"?"🟢":"⚪");
+    document.getElementById("inputArea").style.display="flex";
+    document.getElementById("backBtn").style.display="inline";
+    document.getElementById("menuBtn").style.display="none";
+    renderHistorico(destino);
+    if (!conversas.includes(destino)) {
+      conversas.push(destino);
+      localStorage.setItem("conversas", JSON.stringify(conversas));
+    }
+    naoLidas[destino]=0;
+    localStorage.setItem("naoLidas", JSON.stringify(naoLidas));
+    renderConversas();
+    enviarReadAcksParaContato(destino);
+    if (window.innerWidth<=768) document.getElementById("sidebar").style.display="none";
+    setTimeout(()=>focusInputAndScroll(),200);
+  }
+
+  function focusInputAndScroll(){
+    const input=document.getElementById("msg");
+    input.focus({preventScroll:true});
+    setTimeout(()=>{const chat=document.getElementById("chat"); chat.scrollTop=chat.scrollHeight;},200);
+  }
+
+  renderConversas();
+</script>
 </body>
 </html>
