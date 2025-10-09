@@ -279,44 +279,48 @@
       const hora = parts[2] || new Date().toLocaleTimeString([], {hour:"2-digit", minute:"2-digit"});
       const msgId = parts[3] || (Date.now()+"-"+Math.random().toString(36).slice(2,7));
 
-      // ACK recebido
-      if (autor === "__ACK__") {
-        const tipo = parts[1];
-        const msgIdAck = parts[2];
-        marcarStatusLocal(msgIdAck, tipo);
-        return;
+        // ACKs
+        if (autor === "__ACK__") {
+          const tipo = parts[1]; // delivered|read
+          const msgIdAck = parts[2];
+          marcarStatusLocal(msgIdAck, tipo);
+          return;
+        }
+
+        // ignora minhas próprias mensagens
+        if (autor === usuario) return;
+
+        // se for um contato novo, adiciona automaticamente
+        if (!conversas.includes(autor)) {
+          conversas.push(autor);
+          localStorage.setItem("conversas", JSON.stringify(conversas));
+          renderConversas();
+
+          // e já se inscreve no tópico da conversa
+          const nomes = [usuario, autor].sort().join("_");
+          client.subscribe(`XzzXminichat2025/usuarios/${nomes}`);
+        }
+
+        // salva e mostra a mensagem
+        salvarMensagem(autor, { id: msgId, autor, msg: texto, hora, status: "delivered" });
+
+        // envia ack de entregue
+        setTimeout(() => {
+          const nomes = [autor, usuario].sort().join("_");
+          const t = `XzzXminichat2025/usuarios/${nomes}`;
+          client.publish(t, `__ACK__|delivered|${msgId}|${usuario}`);
+        }, 100);
+
+        // mostra no chat ou notifica
+        if (autor === destinoAtual) {
+          renderHistorico(destinoAtual);
+          enviarReadAcksParaContato(autor);
+        } else {
+          incrementarNaoLidas(autor);
+          renderConversas();
+          notificarNovaMensagem(autor, texto);
+        }
       }
-
-      if (autor === usuario) return; // ignora as próprias
-
-      // cria conversa se ainda não existir
-      if (!conversas.includes(outro)) {
-        conversas.push(outro);
-        localStorage.setItem("conversas", JSON.stringify(conversas));
-        historico[outro] = [];
-        localStorage.setItem("historico", JSON.stringify(historico));
-        renderConversas();
-      }
-
-      // salva mensagem recebida
-      salvarMensagem(outro, { id: msgId, autor, msg: texto, hora, status: "delivered" });
-
-      // envia ACK delivered
-      setTimeout(() => {
-        const t = `XzzXminichat2025/usuarios/${nomes.sort().join("_")}`;
-        client.publish(t, `__ACK__|delivered|${msgId}|${usuario}`);
-      }, 150);
-
-      // atualiza UI
-      if (outro === destinoAtual) {
-        renderHistorico(outro);
-        enviarReadAcksParaContato(outro);
-      } else {
-        incrementarNaoLidas(outro);
-        renderConversas();
-        notificarNovaMensagem(outro, texto);
-      }
-    }
 
     // 🔹 Histórico (filtrado)
     if (topic.startsWith("XzzXminichat2025/historico/")) {
